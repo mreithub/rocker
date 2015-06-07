@@ -1,0 +1,5 @@
+rocker.egg-info
+*.pyc
+
+.kdev4/
+rocker.kdev4
