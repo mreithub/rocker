@@ -47,6 +47,13 @@ def main():
 	elif cmd == 'create':
 		if len(sys.argv) != 3:
 			usage("'create' expects exactly one argument (the .rocker file)")
-		container.create(sys.argv[2])
+
+		name = sys.argv[2]
+
+		#container.create expects a container name as parameter => strip the extension
+		if name.endswith('.rocker'):
+			name = name[:-7]
+
+		container.create(name)
 	else:
 		usage("Unknown command: '{0}'".format(cmd))
