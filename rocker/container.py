@@ -216,13 +216,17 @@ def isCurrent(containerName, imageName, pullImage=True, docker=DockerClient()):
 
 	if imgInfo == None and pullImage == True:
 		image.pull(imageName, docker)
+		imgInfo = image.inspect(imageName)
 
+	if imgInfo == None:
+		raise Exception("Missing image: {0}".format(imageName))
 	print('{0} -- {1}'.format(ctrInfo, imgInfo))
 	if ctrInfo == None:
-		# container not found => not using current image
+		# container not found => we need to build it
 		return False
 	elif imgInfo == None:
 		# image not found => Error
 		raise Exception("Unknown image: {0}", imageName)
 
-	return ctrInfo["Image"] == imgInfo["Id"]
+	# newer versions of an image will get a new Id
+	return ctrInfo.image == imgInfo.id
