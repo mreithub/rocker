@@ -1,13 +1,19 @@
 import json
 import select
 import socket
+import sys
+import time
 import urllib.parse
 
 # Slim internal HTTP client written directly on top of the UNIX socket API.
 # Therefore it can be used with both UNIX and TCP sockets.
 #
-# Right now the implementation is pretty much minimal, but new features will be
-# added when necessary.
+# The intent for this module is only to implement a counterpart for docker's
+# remote API. It's use should be limited to rocker (as the API might change in
+# the future).
+#
+# Right now the implementation is pretty minimal, but new features will be
+# added as needed.
 #
 # You should create a new RestClient instance for each request (maybe we'll
 # implement something like keep-alive sometime in the future, but for now it's
@@ -20,9 +26,8 @@ import urllib.parse
 #     response = client.doGet('/version')
 #     # do something with the response
 #
-# Note for extending RestClient: RestClient manages a small readahead buffer
-# which it uses to implement __readLine(). So always use __read() when reading
-# from the socket.
+# RestClient wraps BufferedReader and ChunkReader around the source socket.
+#
 class RestClient:
 	# RestClient constructor
 	#
@@ -37,7 +42,6 @@ class RestClient:
 	# patch/merge request).
 	def __init__(self, url):
 		url = urllib.parse.urlsplit(url)
-		self._buffer = None
 		self._status = None
 		self._statusMsg = None
 		self._headers = None # response headers
@@ -45,16 +49,18 @@ class RestClient:
 
 
 		if url.scheme == 'unix':
-			self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-			self._sock.connect(url.path)
+			sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+			sock.connect(url.path)
 		elif url.scheme in ['http', 'https']:
 			raise Exception("Not yet implemented: {0}".format(url))
-			self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-			self._sock.create_connection()
+			sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+			sock.create_connection()
 		else:
 			raise Exception("Unsupported schema: {0}".format(url.schema))
 
-		self._sock.setblocking(0)
+		sock.setblocking(0)
+
+		self._sock = ChunkReader(BufferedReader(sock))
 
 	# 'in' operator.
 	# This method will return true if a header with the given name exists
@@ -84,24 +90,38 @@ class RestClient:
 	def close(self):
 		self._sock.close()
 
-	# Internal read command. Reads at most <length> bytes from the socket.
-	# If no bytes are currently available, an empty result will be returned.
-	#
-	# This method maintains a readahead buffer (you can 'undo' reads calling
-	# the __unread() method) which is necessary for __readLine() to work
-	# properly.
-	def __read(self, length):
-		rc = bytes()
-		if self._buffer != None:
-			rc = self._buffer
-			length -= len(rc)
-			self._buffer = None
+	def __parseContentType(self):
+		# will be something like:
+		# - text/plain; charset=utf-8
+		# - application/json
 
-		if length > 0:
-			if self.__wait(0):
-				rc += self._sock.recv(length)
+		# if no charset is specified, this method will assume ascii data
+		# (it's better to raise an exception and be able to fix bugs as they come
+		# than to decode the data in a wrong way)
+		#
+		# JSON however uses a default charset of utf8
+		if 'Content-Type' not in self:
+			raise Exception("Missing Content-Type header in Docker response!")
 
-		return rc
+		header = self.getHeader('Content-Type')
+		cTypeParts = header.split(';')
+		cType = cTypeParts[0].strip().lower()
+		charset = 'ascii'
+
+		if len(cTypeParts) > 2:
+			raise ValueError("Malformed content-type header: {0}".format(header))
+		if len(cTypeParts) == 2:
+			charsetParts = cTypeParts[1].split('=')
+			if len(charsetParts) != 2 or charsetParts[0].lower().strip() != 'charset':
+				raise ValueError("Malformed charset declaration: {0}".format(cTypeParts[1]))
+
+			charset = charsetParts[1].strip().lower()
+		elif cType == 'application/json': # implicitly: and len(cTypeParts) < 2
+			charset = 'utf-8'
+
+		self._contentType = cType
+		self._charset = charset
+
 
 	# Parses the response headers (and returns them)
 	#
@@ -114,7 +134,8 @@ class RestClient:
 			return self._headers
 
 		while True:
-			line = self.__readLine().strip()
+			line = self._sock.readLine().strip()
+			print("header line: {0}".format(line))
 			if len(line) == 0:
 				break
 			else:
@@ -132,8 +153,8 @@ class RestClient:
 					colonPos = line.find(b':')
 					if colonPos < 0:
 						raise Exception("Malformed response header line: {0}".format(line))
-					key = line[:colonPos].strip()
-					value = line[colonPos+1:].strip()
+					key = str(line[:colonPos].strip(), 'ascii')
+					value = str(line[colonPos+1:].strip(), 'utf-8')
 					rc[key] = value
 
 		self._headers = rc
@@ -146,9 +167,9 @@ class RestClient:
 		if self._status not in [200, 201]:
 			# read data
 			data = None
-			if b'content-length' in self:
-				dataLen = int(self.getHeader(b'content-length'))
-				data = self.__read(dataLen)
+			if 'content-length' in self:
+				dataLen = int(self.getHeader('content-length'))
+				data = self._sock.recv(dataLen)
 			else:
 				data = self._headers
 
@@ -156,37 +177,12 @@ class RestClient:
 
 		return rc
 
-	# Reads and returns one line of data from the socket.
-	#
-	# This method is used by __readHeaders() to simplify header parsing.
-	# it invokes __read() until a newline is found and then calls __unread()
-	# to push the extra data onto the readahead buffer.
-	def __readLine(self):
-		buff = []
-
-		while True:
-			data = self.__read(128)
-			nlPos = data.find(b'\n')
-			if nlPos >= 0:
-				# we've found a newline, unread everything after it
-				self.__unread(data[nlPos+1:])
-				buff.append(data[:nlPos])
-				break
-			else:
-				buff.append(data)
-
-		buff = b''.join(buff)
-
-		if buff.endswith(b'\r'):
-			buff = buff[:-1]
-
-		return buff
-
 	# sends an HTTP request to the server (using the method specified)
 	#
 	# If the response's content type indicates JSON data, it will be
 	# deserialized (using json.loads())
-	def __run(self, method, path, data=None):
+	def __run(self, method, path, data=None, parseResponse=True):
+		# send request
 		self._sock.send("{0} {1} HTTP/1.1\r\n".format(method, path).encode('ascii'))
 		if data != None:
 			if type(data) == dict:
@@ -201,27 +197,176 @@ class RestClient:
 		if data != None:
 			self._sock.send(data)
 
+		# parse response headers
 		self.__readHeaders()
+
 		respLen = 0
-		if b'Content-length' in self:
-			respLen = int(self.getHeader(b'Content-Length'))
+		if 'Content-length' in self:
+			respLen = int(self.getHeader('Content-Length'))
 			#raise Exception("Missing Content-Length in Docker response!")
-		if b'Content-Type' not in self:
-			raise Exception("Missing Content-Type header in Docker response!")
 
-		respType = self.getHeader(b'Content-Type')
+		self.__parseContentType()
 
-		rc = self.__read(respLen)
-
-		if respType.lower().split(b';')[0] == b'application/json':
-			rc = json.loads(str(rc, 'utf8'))
+		if self.isChunked():
+				# we've got a response using chunked encoding
+			self._sock.enableChunkedMode()
+			return None
 		else:
-			raise Exception("Expected JSON data, but got '{0}'".format(respType))
+			rc = self.read(respLen, blocking=True)
+			if len(rc) < respLen:
+				raise Exception('only got {0} bytes of response when we were expecting {1}'.format(len(rc), respLen))
+
+			if self._contentType.lower() == 'application/json':
+				try:
+					return json.loads(rc)
+				except ValueError as e:
+					# JSON parser error => print data and rethrow exception
+					print(path)
+					sys.stderr.write("ERROR while parsing JSON data, input:\n{0}\n".format(str(rc, 'utf8')))
+					sys.stderr.write("Headers: {0}\n".format(self._headers))
+					raise e
+			else:
+				raise Exception("Expected JSON data, but got '{0}'".format(respType))
+
+	# Initiate an HTTP GET request to the given path
+	def doGet(self, path):
+		return self.__run('GET', path)
+
+	# Initiate an HTTP POST request to the given path (and sending the data)
+	def doPost(self, path, data, parseResponse=True):
+		return self.__run('POST', path, data, parseResponse)
+
+	# Get a response header
+	def getHeader(self, key):
+		key = key.lower()
+		if self._headers == None:
+			raise Exception("Headers haven't been read yet!")
+		elif key not in self._headerKeys:
+			raise KeyError("Header not found: {0}".format(key))
+		return self._headers[self._headerKeys[key]]
+
+	# Returns True if the server indicated the use of chunked transfer encoding
+	# (by setting the respective header)
+	#
+	# If this method returns True, you need to use readChunk(); read() and readLine() will raise
+	# an exception. If it's false, readChunk() throws an exception while the other two will work.
+	def isChunked(self):
+		if 'Transfer-Encoding' in self:
+			if self.getHeader('Transfer-Encoding').lower().strip() == 'chunked':
+				return True
+		return False
+
+	# Read data from the underlying socket
+	#
+	# If blocking is set to False (default) count will be the maximum number of bytes to read.
+	# If it's true, read() will read exactly count bytes (which means that it might block indefinitely
+	# if you expect more data than you'll get).
+	#
+	# Note: count is in bytes, not characters.
+	def read(self, count, blocking=False):
+		if not blocking:
+			return str(self._sock.recv(count), self._charset)
+		else:
+			rc = b''
+			while count > 0:
+				data = self._sock.recv(count)
+				count -= len(data)
+				rc += data
+				if count > 0:
+					self._sock.wait(1)
+			return str(rc, self._charset)
+
+	# Reads the next response chunk from the underlying socket.
+	#
+	# This method will only return full chunks and might block to wait for
+	# all data to be received.
+	#
+	# However, if there's no data available at all, it will return an empty
+	# result immediately.
+	def readChunk(self):
+		rc = self._sock.readChunk()
+		if rc != None:
+			rc = str(rc, self._charset)
 
 		return rc
 
-	# Push data onto the readahead buffer (which is checked by __read())
-	def __unread(self, data):
+	def readLine(self):
+		return str(self._sock.readLine(), self._charset)
+
+class BufferedReader:
+	# source is a file-like object
+	def __init__(self, source):
+		self._source = source
+		self._buffer = None
+
+	def close(self):
+		self._source.close()
+
+	def enableChunkedMode(self):
+		self._source.enableChunkedMode()
+
+	def fileno(self):
+		return self._source.fileno()
+
+	# Buffered read command. Reads at most <length> bytes from the socket.
+	# If no bytes are currently available, an empty result will be returned.
+	# This method won't block.
+	#
+	# This method maintains a readahead buffer (you can 'undo' reads calling
+	# the unrecv() method)
+	def recv(self, length):
+		rc = bytes()
+		if self._buffer != None:
+			rc = self._buffer
+
+			if len(rc) > length:
+				self._buffer = rc[length:]
+				rc = rc[:length]
+				length = 0
+			else:
+				length -= len(rc)
+				self._buffer = None
+
+		else:
+			if self.wait(2):
+				rc += self._source.recv(length)
+
+		return rc
+
+
+	# Reads and returns one line of data from the socket.
+	#
+	# This method invokes recv() until a newline is found and then calls unrecv()
+	# to push the extra data onto the readahead buffer.
+	#
+	# It will block until a whole method was read
+	def readLine(self):
+		buff = []
+
+		while True:
+			data = self.recv(128)
+			nlPos = data.find(b'\n')
+			if nlPos >= 0:
+				# we've found a newline, unrecv everything after it
+				self.unrecv(data[nlPos+1:])
+				buff.append(data[:nlPos])
+				break
+			else:
+				buff.append(data)
+
+		buff = b''.join(buff)
+
+		# strip \r (windows newline)
+		if buff.endswith(b'\r'):
+			buff = buff[:-1]
+
+		return buff
+
+	def send(self, data):
+		self._source.send(data)
+
+	# Push data onto the readahead buffer (which is checked by read())
+	def unrecv(self, data):
 		if self._buffer != None:
 			# append it to the buffer
 			self._buffer += data
@@ -234,28 +379,77 @@ class RestClient:
 	#
 	# Returns True if there's data to be read, False on timeout
 	#
-	# This method uses select.select() internally. For a timeout of 0,
-	# __wait() will return immediately.
-	def __wait(self, timeout=2):
-		inputs,_,_ = select.select([self._sock], [], [], timeout)
+	# This method uses select.select() internally but uses its own timing code.
+	# For a timeout of 0 wait() will return immediately.
+	def wait(self, timeout=2):
+		if self._buffer != None and len(self._buffer) > 0:
+			return True
+
+		inputs,_,_ = select.select([self._source.fileno()], [], [], timeout)
 		return len(inputs) > 0
 
-	# Initiate an HTTP GET request to the given path
-	def doGet(self, path):
-		return self.__run('GET', path)
+class ChunkReader:
+	def __init__(self, source):
+		self._source = source
+		self._chunked = False
 
-	# Initiate an HTTP POST request to the given path (and sending the data)
-	def doPost(self, path, data):
-		return self.__run('POST', path, data)
+	def close(self):
+		self._source.close
 
-	# Get a response header
-	def getHeader(self, key):
-		key = key.lower()
-		if self._headers == None:
-			raise Exception("Headers haven't been read yet!")
-		elif key not in self._headerKeys:
-			raise KeyError("Header not found: {0}".format(key))
-		return self._headers[self._headerKeys[key]]
+	def enableChunkedMode(self):
+		self._chunked = True
+
+	def fileno(self):
+		return self._source.fileno()
+
+	def recv(self, maxLen):
+		if not self._chunked:
+			# normal un-chunked mode
+			return self._source.recv(maxLen)
+		else:
+			raise IOError("recv() not allowed in chunked mode!")
+
+	def readLine(self):
+		if not self._chunked:
+			# normal mode => simply pass call to BufferedReader
+			return self._source.readLine()
+		else:
+			raise IOError("readLine() not allowed in chunked mode!")
+
+	# reads a whole chunk of data from the server.
+	# If an empty chunk is returned (EOT), this method returns None
+	def readChunk(self):
+		rc = b''
+		if not self._chunked:
+			raise IOError("readChunk() can only be used in chunked mode!")
+
+		# read chunk len (format: '0123abc\r\n' - 0123abc being the hexadecimal length of the next chunk)
+		# TODO handle lack of data (which should result in readLine returning None)
+		length = self._source.readLine()
+		length = int(length, 16)
+
+		# read the actual data
+		while length > 0:
+			# TODO call select()/wait() to avoid busy-waiting
+			data = self._source.recv(length)
+			length -= len(data)
+			rc += data
+
+		# hit the end of a chunk. read \r\n
+		foo = self._source.recv(2)
+		assert foo == b'\r\n'
+
+		# We'll return None instead of an empty string
+		if rc == b'':
+			rc = None # indicates EOT
+
+		return rc
+
+	def send(self, data):
+		self._source.send(data)
+
+	def wait(self, timeout=2):
+		return self._source.wait(timeout)
 
 # Will be raised if the REST server responds with a code other than 200 (Ok)
 class HttpResponseError(Exception):
