@@ -3,7 +3,9 @@ from io import BytesIO
 from rocker.docker import DockerClient
 from rocker.restclient import HttpResponseError
 
+import json
 import os
+import sys
 import tarfile
 
 # Data class representing a Docker image
@@ -115,13 +117,19 @@ def inspect(imageName, docker=DockerClient()):
 
 	with docker.createClient() as c:
 		try:
-			rc = Image(c.doGet('/images/{0}/json'.format(imageName)))
+			rc = c.doGet('/images/{0}/json'.format(imageName))
+
+			if rc == None:
+				# got a chunked response
+				rc = json.loads(c.readChunk())
+
+			rc = Image(rc)
+
 		except HttpResponseError as e:
 			if e.getCode() == 404:
 				pass # return None
 			else:
 				raise e
-
 	return rc
 
 # Returns a list of all local docker images
@@ -132,5 +140,15 @@ def list(docker=DockerClient()):
 			rc.append(Image(data))
 	return rc
 
+def pull(name, docker=DockerClient()):
+	with docker.createClient() as c:
+		c.doPost('/images/create?fromImage={0}'.format(name), data=None, parseResponse=False)
+		while True:
+			chunk = c.readChunk()
+			if chunk == None:
+				break
+			print(":: {0}".format(chunk))
+
 def _findNewestFile():
-	pass
+	# TODO implement me
+	raise Exception("Not yet implemented!!!")
