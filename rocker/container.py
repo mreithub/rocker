@@ -11,9 +11,16 @@ class Container:
 	def __init__(self, json):
 		self.id = json['Id']
 		self.image = json['Image']
-		self.command = json['Command']
+		self.command = Container._getValue(json, 'Command')
 		self.created = json['Created']
-		self.status = json['Status']
+		self.status = Container._getValue(json, 'Status')
+
+	@staticmethod
+	def _getValue(data, key, default=None):
+		if key in data:
+			return data[key]
+		else:
+			return default
 
 # Converts .rocker files to the docker API format
 class RockerFile:
@@ -164,7 +171,7 @@ class RockerFile:
 def create(name, docker=DockerClient()):
 	config = RockerFile(name)
 	# check if the container still uses the most recent image
-	if isCurrent(name, config.image):
+	if isCurrent(name, config.image, pullImage=True, docker=docker):
 		print("Not creating '{0}' - nothing changed".format(name))
 		return
 
@@ -202,10 +209,13 @@ def inspect(containerName, docker=DockerClient()):
 	return rc
 
 # checks whether a container uses the current version of the underlying image
-def isCurrent(containerName, imageName):
+def isCurrent(containerName, imageName, pullImage=True, docker=DockerClient()):
 	print('{0} -- {1}'.format(containerName, imageName))
 	ctrInfo = inspect(containerName)
 	imgInfo = image.inspect(imageName)
+
+	if imgInfo == None and pullImage == True:
+		image.pull(imageName, docker)
 
 	print('{0} -- {1}'.format(ctrInfo, imgInfo))
 	if ctrInfo == None:
