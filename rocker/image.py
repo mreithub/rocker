@@ -115,7 +115,6 @@ def exists(imageName, docker=DockerClient()):
 	return inspect(imageName, docker) != None
 
 def existsInProject(imageName):
-	print("exInP: ", imageName, "=", os.path.isfile(os.path.join(imageName, 'Dockerfile')))
 	return os.path.isfile(os.path.join(imageName, 'Dockerfile'))
 
 # Returns detailed information about the given image (or None if not found)
@@ -182,7 +181,7 @@ def _fillTar(tar, tgtPath):
 
 	while os.path.islink(tgtPath):
 		tgtPath = os.path.join(os.path.dirname(tgtPath), os.readlink(tgtPath))
-		print("resolved symlink:", tgtPath)
+		#print("resolved symlink:", tgtPath)
 
 	__fillTar(tar, tgtPath, '')
 
@@ -193,5 +192,5 @@ def __fillTar(tar, dir, prefix):
 		if os.path.isdir(realPath):
 			__fillTar(tar, realPath, arcPath)
 		else:
-			print("{0} -> {1}".format(realPath, arcPath))
+			#print("{0} -> {1}".format(realPath, arcPath))
 			tar.add(realPath, arcname=arcPath)
