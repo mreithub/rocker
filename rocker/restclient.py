@@ -26,6 +26,8 @@ import urllib.parse
 #     response = client.doGet('/version')
 #     # do something with the response
 #
+# TODO split this up into request/response classes
+#
 # RestClient wraps BufferedReader and ChunkReader around the source socket.
 #
 class RestClient:
@@ -44,9 +46,9 @@ class RestClient:
 		url = urllib.parse.urlsplit(url)
 		self._status = None
 		self._statusMsg = None
-		self._headers = None # response headers
-		self._headerKeys = None # Maps lower case header names to the case sensitive ones
-
+		self._reqHeaders = {}
+		self._respHeaders = None # response headers
+		self._respHeaderKeys = None # Maps lower case header names to the case sensitive ones
 
 		if url.scheme == 'unix':
 			sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -70,10 +72,10 @@ class RestClient:
 	# if 'Content-Type' in restClient:
 	#    contentType = restClient.getHeader('Content-Type')
 	def __contains__(self, key):
-		if self._headerKeys == None:
+		if self._respHeaderKeys == None:
 			raise Exception("Headers haven't been read yet!")
 		else:
-			return key.lower() in self._headerKeys
+			return key.lower() in self._respHeaderKeys
 
 
 	# 'with' statement implementation
@@ -125,17 +127,16 @@ class RestClient:
 
 	# Parses the response headers (and returns them)
 	#
-	# The header data will be stored in self._headers, so subsequent calls
+	# The header data will be stored in self._respHeaders, so subsequent calls
 	# to __readHeaders() will simply return the cached data.
 	def __readHeaders(self):
 		rc = {}
 
-		if self._headers != None:
-			return self._headers
+		if self._respHeaders != None:
+			return self._respHeaders
 
 		while True:
 			line = self._sock.readLine().strip()
-			print("header line: {0}".format(line))
 			if len(line) == 0:
 				break
 			else:
@@ -157,12 +158,12 @@ class RestClient:
 					value = str(line[colonPos+1:].strip(), 'utf-8')
 					rc[key] = value
 
-		self._headers = rc
+		self._respHeaders = rc
 
 		# fill _headerKeys (which allows case-insensitive header lookup)
-		self._headerKeys = {}
+		self._respHeaderKeys = {}
 		for key in rc.keys():
-			self._headerKeys[key.lower()] = key
+			self._respHeaderKeys[key.lower()] = key
 
 		if self._status not in [200, 201]:
 			# read data
@@ -171,7 +172,7 @@ class RestClient:
 				dataLen = int(self.getHeader('content-length'))
 				data = self._sock.recv(dataLen)
 			else:
-				data = self._headers
+				data = self._respHeaders
 
 			raise HttpResponseError(self._statusMsg, self._status, data)
 
@@ -223,7 +224,7 @@ class RestClient:
 					# JSON parser error => print data and rethrow exception
 					print(path)
 					sys.stderr.write("ERROR while parsing JSON data, input:\n{0}\n".format(str(rc, 'utf8')))
-					sys.stderr.write("Headers: {0}\n".format(self._headers))
+					sys.stderr.write("Headers: {0}\n".format(self._respHeaders))
 					raise e
 			else:
 				raise Exception("Expected JSON data, but got '{0}'".format(respType))
@@ -239,11 +240,11 @@ class RestClient:
 	# Get a response header
 	def getHeader(self, key):
 		key = key.lower()
-		if self._headers == None:
+		if self._respHeaders == None:
 			raise Exception("Headers haven't been read yet!")
-		elif key not in self._headerKeys:
+		elif key not in self._respHeaderKeys:
 			raise KeyError("Header not found: {0}".format(key))
-		return self._headers[self._headerKeys[key]]
+		return self._respHeaders[self._respHeaderKeys[key]]
 
 	# Returns True if the server indicated the use of chunked transfer encoding
 	# (by setting the respective header)
@@ -293,6 +294,7 @@ class RestClient:
 	def readLine(self):
 		return str(self._sock.readLine(), self._charset)
 
+		
 class BufferedReader:
 	# source is a file-like object
 	def __init__(self, source):
