@@ -34,26 +34,47 @@ def usage(errMsg=None):
 		sys.exit(1)
 
 def main():
-	if len(sys.argv) <= 1:
-		usage("Missing command!")
-	cmd = sys.argv[1]
+	try:
+		if len(sys.argv) <= 1:
+			usage("Missing command!")
+		cmd = sys.argv[1]
 
-	if cmd == 'help':
-		usage()
-	elif cmd == 'build':
-		if len(sys.argv) != 3:
-			usage("'build' expects exactly one argument (the image path)")
-		image.build(sys.argv[2])
-	elif cmd == 'create':
-		if len(sys.argv) != 3:
-			usage("'create' expects exactly one argument (the .rocker file)")
+		if cmd == 'help':
+			usage()
+		elif cmd == 'build':
+			if len(sys.argv) != 3:
+				usage("'build' expects exactly one argument (the image path)")
+			image.build(sys.argv[2])
+		elif cmd == 'create':
+			if len(sys.argv) != 3:
+				usage("'create' expects exactly one argument (container name/.rocker file)")
 
-		name = sys.argv[2]
+			name = sys.argv[2]
 
-		#container.create expects a container name as parameter => strip the extension
-		if name.endswith('.rocker'):
-			name = name[:-7]
+			#container.create expects a container name as parameter => strip the extension
+			if name.endswith('.rocker'):
+				name = name[:-7]
 
-		container.create(name)
-	else:
-		usage("Unknown command: '{0}'".format(cmd))
+			container.create(name)
+		elif cmd == 'run':
+			if len(sys.argv) != 3:
+				usage("'run' expects exactly one argument (the container name)")
+			name = sys.argv[2]
+
+			#container.run expects a container name as parameter => strip the extension
+			if name.endswith('.rocker'):
+				name = name[:-7]
+
+			container.run(name)
+		else:
+			usage("Unknown command: '{0}'".format(cmd))
+	except BaseException as e:
+		exc_type, exc_value, tb = sys.exc_info()
+		if tb is not None:
+			prev = tb
+			curr = tb.tb_next
+			while curr is not None:
+				prev = curr
+				curr = curr.tb_next
+			print("LocalVars: {0}".format(prev.tb_frame.f_locals))
+		raise e
