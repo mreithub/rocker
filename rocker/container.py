@@ -13,7 +13,7 @@ class Container:
 		self.image = json['Image']
 		self.command = Container._getValue(json, 'Command')
 		self.created = json['Created']
-		self.status = Container._getValue(json, 'Status')
+		self.state = Container._getValue(json, 'State')
 
 	@staticmethod
 	def _getValue(data, key, default=None):
@@ -21,6 +21,14 @@ class Container:
 			return data[key]
 		else:
 			return default
+
+	def isRunning(self):
+		rc = False
+
+		if 'Running' in self.state:
+			rc = self.state['Running']
+
+		return rc
 
 # Converts .rocker files to the docker API format
 class RockerFile:
@@ -170,6 +178,15 @@ class RockerFile:
 
 def create(name, docker=DockerClient()):
 	config = RockerFile(name)
+
+	# check if the image is part of the project and if it needs to be built
+	if image.existsInProject(config.image):
+		image.build(config.image)
+
+	# check container dependencies (and rebuild them)
+	for d in config.depends.keys():
+		create(d)
+
 	# check if the container still uses the most recent image
 	if isCurrent(name, config.image, pullImage=True, docker=docker):
 		print("Not creating '{0}' - nothing changed".format(name))
@@ -180,26 +197,25 @@ def create(name, docker=DockerClient()):
 		# seems to be a local image => try to (re)build it
 		image.build(config.image)
 
-	# check container dependencies (and rebuild them)
-	for d in config.depends.keys():
-		create(d)
+	# TODO if the container is already running, it should be stopped. But is that always what we want?
 
-	resp = docker.createClient().doPost('/containers/create?name={0}'.format(name), config.toApiJson())
-	if 'Warnings' in resp and resp['Warnings'] != None:
-		for w in resp['Warnings']:
-			sys.stderr.write("WARNING: {0}\n".format(w))
-	if not 'Id' in resp:
-		raise Exception("Missing 'Id' in docker response!")
+	with docker.createRequest().doPost('/containers/create?name={0}'.format(name)) as req:
+		resp = send(config.toApiJson()).getObject()
+		if 'Warnings' in resp and resp['Warnings'] != None:
+			for w in resp['Warnings']:
+				sys.stderr.write("WARNING: {0}\n".format(w))
+		if not 'Id' in resp:
+			raise Exception("Missing 'Id' in docker response!")
 
-	return resp['Id']
+		return resp['Id']
 
 # Returns detailed information about the given image (or None if not found)
 def inspect(containerName, docker=DockerClient()):
 	rc = None
 
-	with docker.createClient() as c:
+	with docker.createRequest() as req:
 		try:
-			rc = Container(c.doGet('/containers/{0}/json'.format(containerName)))
+			rc = Container(req.doGet('/containers/{0}/json'.format(containerName)).send().getObject())
 		except HttpResponseError as e:
 			if e.getCode() == 404:
 				pass # return None
@@ -210,7 +226,6 @@ def inspect(containerName, docker=DockerClient()):
 
 # checks whether a container uses the current version of the underlying image
 def isCurrent(containerName, imageName, pullImage=True, docker=DockerClient()):
-	print('{0} -- {1}'.format(containerName, imageName))
 	ctrInfo = inspect(containerName)
 	imgInfo = image.inspect(imageName)
 
@@ -220,7 +235,7 @@ def isCurrent(containerName, imageName, pullImage=True, docker=DockerClient()):
 
 	if imgInfo == None:
 		raise Exception("Missing image: {0}".format(imageName))
-	print('{0} -- {1}'.format(ctrInfo, imgInfo))
+
 	if ctrInfo == None:
 		# container not found => we need to build it
 		return False
@@ -230,3 +245,19 @@ def isCurrent(containerName, imageName, pullImage=True, docker=DockerClient()):
 
 	# newer versions of an image will get a new Id
 	return ctrInfo.image == imgInfo.id
+
+def run(containerName, docker=DockerClient()):
+	create(containerName)
+
+	info = inspect(containerName)
+	if info.isRunning():
+		print("Not starting {0} - already running".format(containerName))
+		return
+
+	config = RockerFile(containerName)
+
+	for d in config.depends:
+		run(d)
+
+	with docker.createRequest() as req:
+		req.doPost('/containers/{0}/start'.format(containerName)).send()

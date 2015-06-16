@@ -1,4 +1,7 @@
-from rocker.restclient import RestClient
+from rocker.restclient import Request
+
+import json
+import sys
 
 # Slim wrapper around RestClient with the default url set
 class DockerClient:
@@ -19,5 +22,20 @@ class DockerClient:
 		self._url = url
 
 	# Returns a new RestClient instance pointing to the URL given in the constructor
-	def createClient(self):
-		return RestClient(self._url)
+	def createRequest(self):
+		try:
+			return Request(self._url)
+		except PermissionError as e:
+			raise PermissionError("Couln't connect to docker at {0}".format(self._url))
+
+	def printDockerOutput(self, httpResponse):
+		while True:
+			chunk = httpResponse.readChunk()
+			if chunk == None:
+				break
+			chunk = json.loads(chunk)
+
+			if 'stream' in chunk:
+				sys.stdout.write(chunk['stream'])
+			else:
+				print(":: {0}".format(chunk))

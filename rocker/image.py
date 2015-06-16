@@ -62,7 +62,7 @@ class TagFile:
 	# The tag file will be created if it doesn't exist
 	def update(self):
 		if not os.path.exists(self.tagPath):
-			sys.utimes(self.tagPath, (self.dataMtime, self.dataMtime))
+			os.utime(self.tagPath, (self.dataMtime, self.dataMtime))
 
 	# returns the mtime of the newest file in path
 	def _findNewestFile(self, path):
@@ -72,7 +72,7 @@ class TagFile:
 			f = os.path.join(path, f)
 			mtime = os.path.getmtime(f)
 			if os.path.isdir(f):
-				mtime = max(self.findNewestFile(f), mtime)
+				mtime = max(self._findNewestFile(f), mtime)
 
 			if mtime > rc:
 				rc = mtime
@@ -88,21 +88,24 @@ class TagFile:
 def build(imagePath, docker=DockerClient()):
 	tagFile = TagFile(imagePath)
 
+	dockerFile = parseDockerfile(imagePath)
+
+	if dockerFile.parent != None:
+		if existsInProject(dockerFile.parent):
+			build(dockerFile.parent)
+
 	if tagFile.check():
 		# nothing seems to have changed => skip building this image
 		sys.stderr.write("Not building image '{0}' - nothing changed\n".format(image))
 		return
 
-	# generate TAR file (will be held in RAM currently. Maybe there's a 
-	# way to really 'stream' it (i.e. only keep small chunks in memory)
-	stream = BytesIO()
-	tar = tarfile.open(mode='w', fileobj=stream)
-
-	tar.add(imagePath)
-
-	# inituate build
-	with docker.createClient() as c:
-		c.doPost('/image/create', stream.getvalue())
+	# initiate build
+	with docker.createRequest().doPost('/build?rm=1&t={0}'.format(imagePath)) as req:
+		req.enableChunkedMode()
+		tar = tarfile.open(mode='w', fileobj=req)
+		_fillTar(tar, imagePath)
+		resp = req.send()
+		docker.printDockerOutput(resp)
 
 	# update mtime
 	tagFile.update()
@@ -111,19 +114,17 @@ def build(imagePath, docker=DockerClient()):
 def exists(imageName, docker=DockerClient()):
 	return inspect(imageName, docker) != None
 
+def existsInProject(imageName):
+	print("exInP: ", imageName, "=", os.path.isfile(os.path.join(imageName, 'Dockerfile')))
+	return os.path.isfile(os.path.join(imageName, 'Dockerfile'))
+
 # Returns detailed information about the given image (or None if not found)
 def inspect(imageName, docker=DockerClient()):
 	rc = None
 
-	with docker.createClient() as c:
+	with docker.createRequest() as req:
 		try:
-			rc = c.doGet('/images/{0}/json'.format(imageName))
-
-			if rc == None:
-				# got a chunked response
-				rc = json.loads(c.readChunk())
-
-			rc = Image(rc)
+			rc = Image(req.doGet('/images/{0}/json'.format(imageName)).send().getObject())
 
 		except HttpResponseError as e:
 			if e.getCode() == 404:
@@ -135,20 +136,62 @@ def inspect(imageName, docker=DockerClient()):
 # Returns a list of all local docker images
 def list(docker=DockerClient()):
 	rc = []
-	with docker.createClient() as c:
-		for data in c.doGet('/images/json'):
+	with docker.createRequest() as req:
+		for data in req.doGet('/images/json').send():
 			rc.append(Image(data))
 	return rc
 
-def pull(name, docker=DockerClient()):
-	with docker.createClient() as c:
-		c.doPost('/images/create?fromImage={0}'.format(name), data=None, parseResponse=False)
-		while True:
-			chunk = c.readChunk()
-			if chunk == None:
-				break
-			print(":: {0}".format(chunk))
+# Parses (parts of) a Dockerfile and returns an Image instance
+#
+# right now we only extract very little information from the Dockerfile.
+# The main purpose for this method is to figure out the source image for this one
+# (to be able to build it if necessary)
+def parseDockerfile(path):
+	# We can handle both the path to the dockerfile as well as its parent directory
+	if os.path.exists(os.path.join(path, 'Dockerfile')):
+		path = os.path.join(path, 'Dockerfile')
 
-def _findNewestFile():
-	# TODO implement me
-	raise Exception("Not yet implemented!!!")
+	parentImage = None
+
+	with open(path, 'r') as f:
+		for line in f.readlines():
+			line = line.strip()
+			if len(line) == 0:
+				continue
+			line = line.split(maxsplit=1)
+			if line[0] == 'FROM':
+				parentImage = line[1]
+
+	return Image({
+		'Parent': parentImage
+	})
+
+def pull(name, docker=DockerClient()):
+	with docker.createRequest() as req:
+		resp = req.doPost('/images/create?fromImage={0}'.format(name), parseResponse=False).send(data=None)
+		docker.printDockerOutput(resp)
+
+# Adds all files in a directory to the specified tarfile object
+# 
+# This method will use tgtPath as root directory (i.e. strip away unnecessary path parts).
+# If tgtPath is a symlink to a directory containing a Dockerfile, _fillTar() will use that
+# directory instead (instead of simply adding the symlink)
+def _fillTar(tar, tgtPath):
+	if not os.path.isfile(os.path.join(tgtPath, "Dockerfile")):
+		raise Exception("No Dockerfile in target path '{0}'")
+
+	while os.path.islink(tgtPath):
+		tgtPath = os.path.join(os.path.dirname(tgtPath), os.readlink(tgtPath))
+		print("resolved symlink:", tgtPath)
+
+	__fillTar(tar, tgtPath, '')
+
+def __fillTar(tar, dir, prefix):
+	for f in os.listdir(dir):
+		realPath = os.path.join(dir, f)
+		arcPath = os.path.join(prefix, f)
+		if os.path.isdir(realPath):
+			__fillTar(tar, realPath, arcPath)
+		else:
+			print("{0} -> {1}".format(realPath, arcPath))
+			tar.add(realPath, arcname=arcPath)

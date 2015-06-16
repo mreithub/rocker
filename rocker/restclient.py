@@ -5,33 +5,24 @@ import sys
 import time
 import urllib.parse
 
-# Slim internal HTTP client written directly on top of the UNIX socket API.
+# Slim HTTP client written directly on top of the UNIX socket API.
 # Therefore it can be used with both UNIX and TCP sockets.
 #
-# The intent for this module is only to implement a counterpart for docker's
-# remote API. It's use should be limited to rocker (as the API might change in
-# the future).
+# Its intended use is  limited to rocker (the restclient API should not be
+# considered stable).
 #
-# Right now the implementation is pretty minimal, but new features will be
-# added as needed.
-#
-# You should create a new RestClient instance for each request (maybe we'll
-# implement something like keep-alive sometime in the future, but for now it's
-# single-request).
+# Right now the idea is to create a new Request instance for each request.
 #
 # The best way to instantiate the client is using a with statement. That way
 # all resources will be released properly. E.g.:
 #
-# with RestClient("unix:///var/run/docker.sock") as client:
-#     response = client.doGet('/version')
+# with Request("unix:///var/run/docker.sock") as req:
+#     response = client.doGet('/version').send()
 #     # do something with the response
 #
-# TODO split this up into request/response classes
-#
-# RestClient wraps BufferedReader and ChunkReader around the source socket.
-#
-class RestClient:
-	# RestClient constructor
+# send() will return a Response object which can then be used to act accordingly
+class Request:
+	# Request constructor
 	#
 	# You'll have to provide either a UNIX socket path or a HTTP/HTTPS server
 	# URL. For example:
@@ -44,11 +35,16 @@ class RestClient:
 	# patch/merge request).
 	def __init__(self, url):
 		url = urllib.parse.urlsplit(url)
-		self._status = None
-		self._statusMsg = None
-		self._reqHeaders = {}
-		self._respHeaders = None # response headers
-		self._respHeaderKeys = None # Maps lower case header names to the case sensitive ones
+
+		self._headers = {}
+		self._headerKeys = {}
+		self._chunked = False
+		self._headersSent = False
+		self._method = None
+		self._url = None
+		self._reqBodyPos = 0
+
+		self.setHeader("User-agent", "rocker v0.1") # TODO use the real rocker version
 
 		if url.scheme == 'unix':
 			sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -64,20 +60,6 @@ class RestClient:
 
 		self._sock = ChunkReader(BufferedReader(sock))
 
-	# 'in' operator.
-	# This method will return true if a header with the given name exists
-	# (case insensitive).
-	# Use it like follows:
-	#
-	# if 'Content-Type' in restClient:
-	#    contentType = restClient.getHeader('Content-Type')
-	def __contains__(self, key):
-		if self._respHeaderKeys == None:
-			raise Exception("Headers haven't been read yet!")
-		else:
-			return key.lower() in self._respHeaderKeys
-
-
 	# 'with' statement implementation
 	# simply returns self
 	def __enter__(self):
@@ -88,10 +70,148 @@ class RestClient:
 	def __exit__(self, type, value, traceback):
 		self.close()
 
+	# Sends the HTTP request headers
+	#
+	# This method makes sure the headers will be sent only once
+	def _sendHeaders(self):
+		if self._headersSent:
+			return
+
+		self._sock.send("{0} {1} HTTP/1.1\r\n".format(self._method, self._url).encode('ascii'))
+
+		for key, value in self._headers.items():
+			# for now I'll only allow ASCII headers (file a bug if that's not enough)
+			self._sock.send("{0}: {1}\r\n".format(key, value).encode('ascii'))
+
+		self._sock.send(b'\r\n')
+
+		self._headersSent = True
+
 	# Closes the underlying socket
 	def close(self):
 		self._sock.close()
 
+	# Specifies the url for this GET request
+	def doGet(self, url):
+		self._method = "GET"
+		self._url = url
+
+		return self
+
+	# Specifies the url for this POST request
+	def doPost(self, url):
+		self._method = "POST"
+		self._url = url
+
+		return self
+
+	# Tells Request to use chunked mode
+	#
+	# You need to call this method before using write().
+	# But in chunked mode send() won't accept any request body data.
+	#
+	# Will fail if the headers have already been sent.
+	def enableChunkedMode(self):
+		self.setHeader("Transfer-encoding", "chunked")
+		self._chunked = True
+
+	# Set a request header
+	#
+	# Header names are case insensitive (so 'Content-type' will overwrite 'Content-Type', etc.)
+	#
+	# This method will fail if the headers have been sent already
+	def setHeader(self, key, value):
+		if self._headersSent:
+			raise Exception("Headers already sent!")
+		if key.lower() in self._headerKeys:
+			# overwrite header
+			del self._headers[self._headerKeys[key]]
+
+		self._headers[key] = value
+		self._headerKeys[key.lower()] = key
+
+	# Finalizes the request and returns a Response object
+	#
+	# This method will send the headers if that hasn't happened yet,
+	# send data if not in chunked mode and then return a Response
+	# object using the underlying socket
+	def send(self, data=None):
+		if data != None:
+			if self._chunked:
+				raise Exception("data can't be set when in chunked mode")
+
+			if type(data) == dict:
+				data = bytes(json.dumps(data), 'utf8')
+
+			self.setHeader("Content-type", "application/json")
+			self.setHeader("Content-length", str(len(data)))
+		elif self._chunked:
+			# send final chunk
+			self._sock.send(b'0\r\n\r\n')
+
+		self._sendHeaders()
+
+		if data != None:
+			self._sock.send(data)
+
+		return Response(self._sock)
+
+	# Returns the number of bytes already written in the request body
+	#
+	# With this method you can use Request as `fileobj` parameter for `tarfile`
+	def tell(self):
+		return self._reqBodyPos
+
+	# Write request body data in chunked mode
+	def write(self, data):
+		if not self._chunked:
+			raise Exception("Request.write() only works in chunked mode!")
+
+		# make sure we can actually write data
+		select.select([], [self._sock], [])
+
+		self._sendHeaders()
+		self._sock.send("{0:x}\r\n".format(len(data)).encode('ascii'))
+		self._sock.send(data)
+		self._sock.send(b"\r\n")
+		self._reqBodyPos += len(data)
+
+# Represents a HTTP response
+#
+# Response objects are created by Request.send().
+#
+# They will parse the response headers, try to figure out content type and charset
+# and give you access to the response body in various forms
+class Response:
+	# Response constructor (should only be called by Request.send()
+	def __init__(self, sock):
+		self._sock = ChunkReader(BufferedReader(sock))
+		self._headers = None
+		self._headerKeys = {}
+		self._status = None
+		self._statusMsg = None
+
+		self._parseHeaders()
+
+		self.__parseContentType()
+
+		if self.isChunked():
+			self._sock.enableChunkedMode()
+
+	# 'in' operator.
+	# This method will return true if a response header with the given name exists
+	# (case insensitive).
+	# Use it like follows:
+	#
+	# if 'Content-Type' in restClient:
+	#    contentType = restClient.getHeader('Content-type')
+	def __contains__(self, key):
+		if self._headerKeys == None:
+			raise Exception("Headers haven't been read yet!")
+		else:
+			return key.lower() in self._headerKeys
+
+	# Internal method to figure out the response data type and character set
 	def __parseContentType(self):
 		# will be something like:
 		# - text/plain; charset=utf-8
@@ -103,7 +223,11 @@ class RestClient:
 		#
 		# JSON however uses a default charset of utf8
 		if 'Content-Type' not in self:
-			raise Exception("Missing Content-Type header in Docker response!")
+			if self._status == 204: # no content
+				self._contentType = None
+				self._charset = None
+			else:
+				raise Exception("Missing Content-Type header in Docker response!")
 
 		header = self.getHeader('Content-Type')
 		cTypeParts = header.split(';')
@@ -124,16 +248,15 @@ class RestClient:
 		self._contentType = cType
 		self._charset = charset
 
-
 	# Parses the response headers (and returns them)
 	#
-	# The header data will be stored in self._respHeaders, so subsequent calls
+	# The header data will be stored in self._headers, so subsequent calls
 	# to __readHeaders() will simply return the cached data.
-	def __readHeaders(self):
+	def _parseHeaders(self):
 		rc = {}
 
-		if self._respHeaders != None:
-			return self._respHeaders
+		if self._headers != None:
+			return self._headers
 
 		while True:
 			line = self._sock.readLine().strip()
@@ -158,93 +281,50 @@ class RestClient:
 					value = str(line[colonPos+1:].strip(), 'utf-8')
 					rc[key] = value
 
-		self._respHeaders = rc
+		self._headers = rc
 
 		# fill _headerKeys (which allows case-insensitive header lookup)
-		self._respHeaderKeys = {}
+		self._headerKeys = {}
 		for key in rc.keys():
-			self._respHeaderKeys[key.lower()] = key
+			self._headerKeys[key.lower()] = key
 
-		if self._status not in [200, 201]:
+		if self._status not in [200, 201, 204]:
 			# read data
 			data = None
 			if 'content-length' in self:
 				dataLen = int(self.getHeader('content-length'))
 				data = self._sock.recv(dataLen)
 			else:
-				data = self._respHeaders
+				data = self._headers
 
 			raise HttpResponseError(self._statusMsg, self._status, data)
 
 		return rc
 
-	# sends an HTTP request to the server (using the method specified)
+
+	# Get a response header (key is case insensitive)
 	#
-	# If the response's content type indicates JSON data, it will be
-	# deserialized (using json.loads())
-	def __run(self, method, path, data=None, parseResponse=True):
-		# send request
-		self._sock.send("{0} {1} HTTP/1.1\r\n".format(method, path).encode('ascii'))
-		if data != None:
-			if type(data) == dict:
-				data = bytes(json.dumps(data), 'utf8')
-
-			# send request headers and data
-			self._sock.send("Content-length: {0}\r\n".format(len(data)).encode('ascii'))
-			self._sock.send(b"Content-type: application/json\r\n")
-
-		self._sock.send(b'\r\n')
-
-		if data != None:
-			self._sock.send(data)
-
-		# parse response headers
-		self.__readHeaders()
-
-		respLen = 0
-		if 'Content-length' in self:
-			respLen = int(self.getHeader('Content-Length'))
-			#raise Exception("Missing Content-Length in Docker response!")
-
-		self.__parseContentType()
-
-		if self.isChunked():
-				# we've got a response using chunked encoding
-			self._sock.enableChunkedMode()
-			return None
-		else:
-			rc = self.read(respLen, blocking=True)
-			if len(rc) < respLen:
-				raise Exception('only got {0} bytes of response when we were expecting {1}'.format(len(rc), respLen))
-
-			if self._contentType.lower() == 'application/json':
-				try:
-					return json.loads(rc)
-				except ValueError as e:
-					# JSON parser error => print data and rethrow exception
-					print(path)
-					sys.stderr.write("ERROR while parsing JSON data, input:\n{0}\n".format(str(rc, 'utf8')))
-					sys.stderr.write("Headers: {0}\n".format(self._respHeaders))
-					raise e
-			else:
-				raise Exception("Expected JSON data, but got '{0}'".format(respType))
-
-	# Initiate an HTTP GET request to the given path
-	def doGet(self, path):
-		return self.__run('GET', path)
-
-	# Initiate an HTTP POST request to the given path (and sending the data)
-	def doPost(self, path, data, parseResponse=True):
-		return self.__run('POST', path, data, parseResponse)
-
-	# Get a response header
+	# Raises a KeyError if the header wasn't found, so use the `in` operator before calling
+	# this method.
 	def getHeader(self, key):
 		key = key.lower()
-		if self._respHeaders == None:
+		if self._headers == None:
 			raise Exception("Headers haven't been read yet!")
-		elif key not in self._respHeaderKeys:
+		elif key not in self._headerKeys:
 			raise KeyError("Header not found: {0}".format(key))
-		return self._respHeaders[self._respHeaderKeys[key]]
+		return self._headers[self._headerKeys[key]]
+
+	# Returns a json decoded response object.
+	#
+	# if the response was chunked, this method only reads the first chunk (might change if it turns out to be necessary)
+	# If it wasn't, readAll() will be used.
+	def getObject(self):
+		rc = None
+		if self.isChunked():
+			rc = self.readChunk()
+		else:
+			rc = self.readAll()
+		return json.loads(rc)
 
 	# Returns True if the server indicated the use of chunked transfer encoding
 	# (by setting the respective header)
@@ -277,6 +357,23 @@ class RestClient:
 					self._sock.wait(1)
 			return str(rc, self._charset)
 
+	# Reads exactly `content-length` response bytes and decodes them using the detected encoding.
+	#
+	# This method will only work if the content-length header was specified by the remote server
+	# (which won't be the case for chunked responses)
+	def readAll(self):
+		if self.isChunked():
+			raise Exception("readAll() can't be used in chunked mode!")
+		count = int(self.getHeader('Content-length'))
+		rc = []
+
+		while count > 0:
+			data = self._sock.recv(count)
+			count -= len(data)
+			rc.append(data)
+
+		return str(b''.join(rc), self._charset)
+
 	# Reads the next response chunk from the underlying socket.
 	#
 	# This method will only return full chunks and might block to wait for
@@ -291,10 +388,11 @@ class RestClient:
 
 		return rc
 
+	# Reads the next line from the underlying socket
 	def readLine(self):
 		return str(self._sock.readLine(), self._charset)
 
-		
+# Wraps around the socket to provide readline() and unrecv()
 class BufferedReader:
 	# source is a file-like object
 	def __init__(self, source):
@@ -390,6 +488,7 @@ class BufferedReader:
 		inputs,_,_ = select.select([self._source.fileno()], [], [], timeout)
 		return len(inputs) > 0
 
+# HTTP chunked response implementation
 class ChunkReader:
 	def __init__(self, source):
 		self._source = source
@@ -410,13 +509,6 @@ class ChunkReader:
 			return self._source.recv(maxLen)
 		else:
 			raise IOError("recv() not allowed in chunked mode!")
-
-	def readLine(self):
-		if not self._chunked:
-			# normal mode => simply pass call to BufferedReader
-			return self._source.readLine()
-		else:
-			raise IOError("readLine() not allowed in chunked mode!")
 
 	# reads a whole chunk of data from the server.
 	# If an empty chunk is returned (EOT), this method returns None
@@ -446,6 +538,13 @@ class ChunkReader:
 			rc = None # indicates EOT
 
 		return rc
+
+	def readLine(self):
+		if not self._chunked:
+			# normal mode => simply pass call to BufferedReader
+			return self._source.readLine()
+		else:
+			raise IOError("readLine() not allowed in chunked mode!")
 
 	def send(self, data):
 		self._source.send(data)
