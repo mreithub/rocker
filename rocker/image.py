@@ -43,7 +43,7 @@ class TagFile:
 	# This method will use _findNewestFile() to get max(mtime) of all the files
 	# in path recursively
 	def __init__(self, path):
-		self.tagPath = os.path.join(path, '.rockerFile')
+		self.tagPath = os.path.join(path, '.rockerBuild')
 		self.tagMtime = 0
 
 		if os.path.exists(self.tagPath):
@@ -62,7 +62,9 @@ class TagFile:
 	# The tag file will be created if it doesn't exist
 	def update(self):
 		if not os.path.exists(self.tagPath):
-			os.utime(self.tagPath, (self.dataMtime, self.dataMtime))
+			with open(self.tagPath, 'w') as f:
+				pass
+		os.utime(self.tagPath, (self.dataMtime, self.dataMtime))
 
 	# returns the mtime of the newest file in path
 	def _findNewestFile(self, path):
@@ -94,10 +96,15 @@ def build(imagePath, docker=DockerClient()):
 		if existsInProject(dockerFile.parent):
 			build(dockerFile.parent)
 
-	if tagFile.check():
+	imgInfo = inspect(imagePath)
+
+	# If docker knows nothing about the image, build it even if there's a .rockerBuild file
+	if imgInfo != None and tagFile.check():
 		# nothing seems to have changed => skip building this image
-		sys.stderr.write("Not building image '{0}' - nothing changed\n".format(image))
+		sys.stderr.write("Not building image '{0}' - nothing changed\n".format(imagePath))
 		return
+
+	docker.printDockerMessage({'status': "Building image {0}".format(imagePath)})
 
 	# initiate build
 	with docker.createRequest().doPost('/build?rm=1&t={0}'.format(imagePath)) as req:
@@ -167,7 +174,7 @@ def parseDockerfile(path):
 
 def pull(name, docker=DockerClient()):
 	with docker.createRequest() as req:
-		resp = req.doPost('/images/create?fromImage={0}'.format(name), parseResponse=False).send(data=None)
+		resp = req.doPost('/images/create?fromImage={0}'.format(name)).send(data=None)
 		docker.printDockerOutput(resp)
 
 # Adds all files in a directory to the specified tarfile object
