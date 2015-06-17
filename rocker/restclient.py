@@ -227,6 +227,7 @@ class Response:
 			if self._status == 204: # no content
 				self._contentType = None
 				self._charset = None
+				return
 			else:
 				raise Exception("Missing Content-Type header in Docker response!")
 
