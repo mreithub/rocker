@@ -1,3 +1,4 @@
+import codecs
 import json
 import select
 import socket
@@ -56,7 +57,7 @@ class Request:
 		else:
 			raise Exception("Unsupported schema: {0}".format(url.schema))
 
-		sock.setblocking(0)
+#		sock.setblocking(0)
 
 		self._sock = ChunkReader(BufferedReader(sock))
 
@@ -348,14 +349,7 @@ class Response:
 		if not blocking:
 			return str(self._sock.recv(count), self._charset)
 		else:
-			rc = b''
-			while count > 0:
-				data = self._sock.recv(count)
-				count -= len(data)
-				rc += data
-				if count > 0:
-					self._sock.wait(1)
-			return str(rc, self._charset)
+			return str(self._sock.readExactly(count), self._charset)
 
 	# Reads exactly `content-length` response bytes and decodes them using the detected encoding.
 	#
@@ -365,12 +359,7 @@ class Response:
 		if self.isChunked():
 			raise Exception("readAll() can't be used in chunked mode!")
 		count = int(self.getHeader('Content-length'))
-		rc = []
-
-		while count > 0:
-			data = self._sock.recv(count)
-			count -= len(data)
-			rc.append(data)
+		rc = self._sock.readExactly(count)
 
 		return str(b''.join(rc), self._charset)
 
@@ -433,6 +422,18 @@ class BufferedReader:
 
 		return rc
 
+	# Reads exactly length bytes from the socket
+	#
+	# May block indefinitely
+	def readExactly(self, length):
+		rc = []
+		while length > 0:
+			self.wait()
+			data = self.recv(length)
+			length -= len(data)
+			rc.append(data)
+
+		return b''.join(rc)
 
 	# Reads and returns one line of data from the socket.
 	#
@@ -513,31 +514,33 @@ class ChunkReader:
 	# reads a whole chunk of data from the server.
 	# If an empty chunk is returned (EOT), this method returns None
 	def readChunk(self):
-		rc = b''
 		if not self._chunked:
 			raise IOError("readChunk() can only be used in chunked mode!")
 
 		# read chunk len (format: '0123abc\r\n' - 0123abc being the hexadecimal length of the next chunk)
-		# TODO handle lack of data (which should result in readLine returning None)
 		length = self._source.readLine()
 		length = int(length, 16)
 
 		# read the actual data
-		while length > 0:
-			# TODO call select()/wait() to avoid busy-waiting
-			data = self._source.recv(length)
-			length -= len(data)
-			rc += data
+		rc = self._source.readExactly(length)
 
 		# hit the end of a chunk. read \r\n
-		foo = self._source.recv(2)
-		assert foo == b'\r\n'
+		chunkEnd = self._source.readExactly(2)
+		if chunkEnd != b'\r\n':
+			raise Exception("Got invalid chunk end mark: {0} (expected {1})".format(codecs.encode(chunkEnd, 'hex'), codecs.encode(b'\r\n', 'hex')))
 
 		# We'll return None instead of an empty string
 		if rc == b'':
 			rc = None # indicates EOT
 
 		return rc
+
+	def readExactly(self):
+		if not self._chunked:
+			# normal mode => simply pass call to BufferedReader
+			return self._source.readExactly()
+		else:
+			raise IOError("readExactly() not allowed in chunked mode!")
 
 	def readLine(self):
 		if not self._chunked:
