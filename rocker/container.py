@@ -200,7 +200,7 @@ def create(name, docker=DockerClient()):
 	# TODO if the container is already running, it should be stopped. But is that always what we want?
 
 	with docker.createRequest().doPost('/containers/create?name={0}'.format(name)) as req:
-		resp = send(config.toApiJson()).getObject()
+		resp = req.send(config.toApiJson()).getObject()
 		if 'Warnings' in resp and resp['Warnings'] != None:
 			for w in resp['Warnings']:
 				sys.stderr.write("WARNING: {0}\n".format(w))
