@@ -42,7 +42,7 @@ class RockerFile:
 
 		self.env = RockerFile._getValue(config, 'env')
 		self.links = self._parseLinks(config)
-		self.ports = RockerFile._getValue(config, 'ports')
+		self.ports = RockerFile._parsePorts(config)
 		self.raw = RockerFile._getValue(config, 'raw')
 		self.volumes = RockerFile._parseVolumes(config, name)
 		self.volumesFrom = self._parseVolumesFrom(config)
@@ -76,6 +76,17 @@ class RockerFile:
 				links.append("{0}:{1}".format(containerName, alias))
 			hostConfig['links'] = links
 
+		if self.ports != None:
+			portBindings = {}
+			for port in self.ports:
+				key = "{ext}/{proto}".format(**port)
+				extIp = port['extIp']
+				if extIp == None:
+					extIp = ''
+
+				portBindings[key] = [{"HostIp":extIp, "HostPort":str(port['int'])}]
+			hostConfig['PortBindings'] = portBindings
+
 		rc['HostConfig'] = hostConfig
 
 		return rc
@@ -108,7 +119,7 @@ class RockerFile:
 					v = v.split(':', maxsplit=1)
 					if len(v) == 1:
 						v.append(v[0]) # duplicate item
-					realLinks[v[1]] == v[0]
+					realLinks[v[1]] = v[0]
 				rc = realLinks
 
 			elif type(links) == dict: # { alias: containerName, ... }
@@ -119,6 +130,37 @@ class RockerFile:
 			# add links to dependencies (to be able to (re-)build them if necessary)
 			for container in rc.values():
 				self.depends[container] = None
+
+		return rc
+
+	# expected format is one of:
+	# - [ 123, 456, 789, ... ]
+	# - [ {proto:tcp, int:123, ext:2123, extIp:...}, ...] <- that's how we store it internally
+	@staticmethod
+	def _parsePorts(config):
+		rc = []
+
+		if 'ports' not in config:
+			pass # simply return an empty list
+		elif type(config['ports']) != list:
+			raise Exception("Expected a port list!")
+		else:
+			for port in config['ports']:
+				if type(port) == int:
+					rc.append({'proto': 'tcp', 'int': port, 'ext': port, 'extIp': None})
+				elif type(port) == dict:
+					if not 'int' in port:
+						raise Exception("Missing internal port: {0}".format(port))
+					if not 'ext' in port:
+						raise Exception("Missing external port: {0}".format(port))
+					if not 'proto' in port:
+						port['proto'] = 'tcp'
+					if not 'extIp' in port:
+						port['extIp'] = None
+
+					rc.append(port)
+
+			del config['ports']
 
 		return rc
 
@@ -185,7 +227,9 @@ def create(name, docker=DockerClient()):
 
 	# check container dependencies (and rebuild them)
 	for d in config.depends.keys():
-		create(d)
+		# it seems that for docker links to work properly the containers have to be started at least once.
+		# For simplicity, we'll start them now
+		run(d)
 
 	# check if the container still uses the most recent image
 	if isCurrent(name, config.image, pullImage=True, docker=docker):
