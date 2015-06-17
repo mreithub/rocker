@@ -361,7 +361,7 @@ class Response:
 		count = int(self.getHeader('Content-length'))
 		rc = self._sock.readExactly(count)
 
-		return str(b''.join(rc), self._charset)
+		return str(rc, self._charset)
 
 	# Reads the next response chunk from the underlying socket.
 	#
@@ -535,10 +535,10 @@ class ChunkReader:
 
 		return rc
 
-	def readExactly(self):
+	def readExactly(self, length):
 		if not self._chunked:
 			# normal mode => simply pass call to BufferedReader
-			return self._source.readExactly()
+			return self._source.readExactly(length)
 		else:
 			raise IOError("readExactly() not allowed in chunked mode!")
 
