@@ -47,6 +47,9 @@ class RockerFile:
 		self.volumes = RockerFile._parseVolumes(config, name)
 		self.volumesFrom = self._parseVolumesFrom(config)
 
+		self.cmd = RockerFile._getValue(config, 'cmd')
+		self.entrypoint = RockerFile._getValue(config, 'entrypoint')
+
 		# all the remaining keys in data are unsupporyed => issue warnings
 		for key in config.keys():
 			sys.stderr.write("WARNING: unsupported .rocker key: '{0}'\n".format(key))
@@ -84,7 +87,7 @@ class RockerFile:
 				if extIp == None:
 					extIp = ''
 
-				portBindings[key] = [{"HostIp":extIp, "HostPort":str(port['int'])}]
+				portBindings[key] = [{"HostIp":extIp, "HostPort": str(port['int'])}]
 			hostConfig['PortBindings'] = portBindings
 
 		rc['HostConfig'] = hostConfig
@@ -146,13 +149,13 @@ class RockerFile:
 			raise Exception("Expected a port list!")
 		else:
 			for port in config['ports']:
-				if type(port) == int:
+				if type(port) == int: # format: 123 (simply a number)
 					rc.append({'proto': 'tcp', 'int': port, 'ext': port, 'extIp': None})
-				elif type(port) == dict:
+				elif type(port) == dict: # format: {'int': 123, 'ext': 1234, 'extIp': "127.0.0.1", "proto": "tcp"}
 					if not 'int' in port:
-						raise Exception("Missing internal port: {0}".format(port))
+						raise Exception("Missing internal port ('int'): {0}".format(port))
 					if not 'ext' in port:
-						raise Exception("Missing external port: {0}".format(port))
+						raise Exception("Missing external port ('ext'): {0}".format(port))
 					if not 'proto' in port:
 						port['proto'] = 'tcp'
 					if not 'extIp' in port:
@@ -172,7 +175,7 @@ class RockerFile:
 			rc = []
 			for v in config['volumes']:
 				volStr = None
-				if type(v) == dict:
+				if type(v) == dict: # format: { "from": "path/to/host/dir", "to": "/internal/path", "ro": true }
 					if not 'to' in v:
 						raise ValueError("Volume config needs a 'to' field!")
 					if 'from' in v:
@@ -203,6 +206,8 @@ class RockerFile:
 			# add containers to dependencies
 			for container in rc:
 				self.depends[container] = None
+
+			del config['volumesFrom']
 
 		return rc
 
