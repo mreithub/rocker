@@ -75,7 +75,7 @@ The following is a complete example of all supported configuration options:
             { "from": "/home/user/app", "to": "/app", "ro": true },
             ...
         ],
-        "volumesFrom": ["app-data],
+        "volumesFrom": ["app-data"],
         "cmd": ["echo", "hello world"],
         "entrypoint": ["echo", "foo"],
         "raw": {...}
