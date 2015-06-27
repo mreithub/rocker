@@ -1,0 +1,4 @@
+{
+	"image": "postgres",
+	"volumesFrom": "postgres-data"
+}

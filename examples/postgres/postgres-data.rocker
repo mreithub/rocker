@@ -1,0 +1,4 @@
+{
+	"image": "postgres",
+	"entrypoint": ["echo", "Data container for the postgres container"]
+}
