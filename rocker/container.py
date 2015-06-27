@@ -69,6 +69,11 @@ class RockerFile:
 				env.append("{0}={1}".format(key, value))
 			rc['Env'] = env
 
+		if self.cmd != None:
+			rc["Cmd"] = self.cmd
+
+		if self.entrypoint != None:
+			rc["Entrypoint"] = self.entrypoint
 
 		hostConfig = {}
 		if self.links != None:
