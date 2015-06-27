@@ -174,7 +174,7 @@ def parseDockerfile(path):
 
 def pull(name, docker=DockerClient()):
 	with docker.createRequest() as req:
-		resp = req.doPost('/images/create?fromImage={0}'.format(name)).send(data=None)
+		resp = req.doPost('/images/create?fromImage={0}%3Alatest'.format(name)).send(data=None)
 		docker.printDockerOutput(resp)
 
 # Adds all files in a directory to the specified tarfile object
