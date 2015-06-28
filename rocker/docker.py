@@ -41,6 +41,7 @@ class DockerClient:
 			url = 'unix:///var/run/docker.sock'
 
 		self._url = url
+		self._lastMsgId = None
 
 	# Returns a new RestClient instance pointing to the URL given in the constructor
 	def createRequest(self):
@@ -57,13 +58,46 @@ class DockerClient:
 			chunk = json.loads(chunk)
 			self.printDockerMessage(chunk)
 
+	# Print Docker status messages (with color coding)
+	#
+	# This method will print subsequent messages for the same image/container ID in the same line (i.e. overwrite the last message)
 	def printDockerMessage(self, msgJson):
+		col = None
+		msg = None
+
+		if 'id' in msgJson:
+			# overwrite lines with the same ID (instead of printing a new one)
+			if self._lastMsgId == msgJson['id']:
+				# go back one line (and clear it)
+				sys.stdout.write('\033[1A\033[K')
+
+			# prepend ID
+			sys.stdout.write("{0}: ".format(msgJson['id']))
+
+		# color message depending on type
 		if 'error' in msgJson:
-			print(Col.FAIL, msgJson['error'], Col.ENDC)
+			col = Col.FAIL
+			msg = msgJson['error']
 		elif 'status' in msgJson:
-			print(Col.OKBLUE, msgJson['status'], Col.ENDC)
+			col = Col.OKBLUE
+			msg = msgJson['status']
+
+			if 'progress' in msgJson:
+				msg = "{0} {1}".format(msgJson['status'], msgJson['progress'])
 		elif 'stream' in msgJson:
-			sys.stdout.write(msgJson['stream'])
+			msg = msgJson['stream']
+
 		else:
-			print(":: {0}".format(msgJson))
+			msg = ":: {0}".format(msgJson)
+
+		if col != None:
+			msg = "{0}{1}{2}".format(col, msg, Col.ENDC)
+
+		sys.stdout.write("{0}\n".format(msg))
+
+		# update _lastMsgId
+		if 'id' in msgJson:
+			self._lastMsgId = msgJson['id']
+		else:
+			self._lastMsgId = None
 
