@@ -1,0 +1,10 @@
+{
+	"image": "wordpress",
+	"links": {
+		"mysql": "mysql-wp"
+	},
+	"ports": [ 80 ],
+	"volumes": [
+		{"src": "www", "tgt": "/var/www/html"}
+	]
+}

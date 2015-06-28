@@ -1,0 +1,9 @@
+{
+	"image": "mysql",
+	"env": {
+		"MYSQL_ROOT_PASSWORD": "hackme"
+	},
+	"volumes": [
+		{ "src": "mysql", "tgt": "/var/lib/mysql" }
+	]
+}
