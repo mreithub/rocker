@@ -32,6 +32,12 @@ class Container:
 
 # Converts .rocker files to the docker API format
 class RockerFile:
+	class Volume:
+		def __init__(self, tgt, src=None, ro=False):
+			self.src = src
+			self.tgt = tgt
+			self.ro = ro
+
 	def __init__(self, name):
 		config = RockerFile._readConfig(name)
 
@@ -56,26 +62,31 @@ class RockerFile:
 
 	def toApiJson(self):
 		rc = {}
+		hostConfig = {}
 
 		# non-raw entries override raw ones => seed from raw first
 		if self.raw != None:
 			rc = self.raw;
 
+		# image
 		rc['Image'] = self.image
 
+		# env
 		if self.env != None:
 			env = []
 			for key, value in self.env.items():
 				env.append("{0}={1}".format(key, value))
 			rc['Env'] = env
 
+		# cmd
 		if self.cmd != None:
 			rc["Cmd"] = self.cmd
 
+		# entrypoint
 		if self.entrypoint != None:
 			rc["Entrypoint"] = self.entrypoint
 
-		hostConfig = {}
+		# links
 		if self.links != None:
 			# convert the {'alias': 'containerName', ...} format to ["containerName:alias"]
 			links = []
@@ -84,6 +95,7 @@ class RockerFile:
 				links.append("{0}:{1}".format(containerName, alias))
 			hostConfig['links'] = links
 
+		# ports
 		if self.ports != None:
 			portBindings = {}
 			for port in self.ports:
@@ -94,6 +106,28 @@ class RockerFile:
 
 				portBindings[key] = [{"HostIp":extIp, "HostPort": str(port['int'])}]
 			hostConfig['PortBindings'] = portBindings
+
+		# volumes
+		if self.volumes != None:
+			volumeList = {}
+			bindList = []
+			for volume in self.volumes:
+				# docker distinguishes between host volumes (aka 'binds') and internal volumes
+				if volume.src != None:
+					# bind mount
+					if volume.ro:
+						bindStr = "{0}:{1}:ro"
+					else:
+						bindStr = "{0}:{1}"
+					bindList.append(bindStr.format(volume.src, volume.tgt))
+				else:
+					# internal volume
+					volumeList[volume.tgt] = {}
+
+			if len(volumeList) > 0:
+				rc['Volumes'] = volumeList
+			if len(bindList) > 0:
+				hostConfig['Binds'] = bindList
 
 		rc['HostConfig'] = hostConfig
 
@@ -172,6 +206,7 @@ class RockerFile:
 
 		return rc
 
+	# returns a list of Volume objects (with .src, .tgt and .ro properties)
 	@staticmethod
 	def _parseVolumes(config, containerName):
 		rc = None
@@ -179,24 +214,28 @@ class RockerFile:
 		if 'volumes' in config:
 			rc = []
 			for v in config['volumes']:
-				volStr = None
-				if type(v) == dict: # format: { "from": "path/to/host/dir", "to": "/internal/path", "ro": true }
-					if not 'to' in v:
-						raise ValueError("Volume config needs a 'to' field!")
-					if 'from' in v:
-						# create host directory if necessary
-						fromPath = os.path.join('/docker', containerName, v['from'])
-						RockerFile._mkdirs(fromPath)
+				src = None
+				tgt = v['tgt']
+				ro = False
 
-						volStr = '{fr}:{to}'.format(fr=fromPath, to=v['to'])
-					else:
-						volStr = v['to']
+				if type(v) == dict: # format: { "src": "path/to/host/dir", "tgt": "/internal/path", "ro": true }
+					if not 'tgt' in v:
+						raise ValueError("Volume config needs a 'tgt' field!")
+
+					if 'src' in v:
+						# create host directory if necessary
+						srcPath = os.path.join('/docker', containerName, v['src'])
+						RockerFile._mkdirs(srcPath)
+						src = srcPath
 
 					if 'ro' in v and v['ro'] == True:
-						volStr += ':ro'
-				else:
-					volStr = v
-				rc.append(volStr)
+						ro = True
+
+				else: # format: "/internal/path"
+					tgt = v
+
+				rc.append(RockerFile.Volume(tgt, src, ro))
+			del config['volumes']
 
 		return rc
 

@@ -70,9 +70,9 @@ The following is a complete example of all supported configuration options:
             ...
         ],
         "volumes": [
-            { "to": "/data" },
-            { "from": "psql", "to": "/var/lib/postgresql/data/" },
-            { "from": "/home/user/app", "to": "/app", "ro": true },
+            { "tgt": "/data" },
+            { "src": "psql", "tgt": "/var/lib/postgresql/data/" },
+            { "src": "/home/user/app", "tgt": "/app", "ro": true },
             ...
         ],
         "volumesFrom": ["app-data"],
@@ -120,18 +120,18 @@ Description:
     The parameters ``int`` and ``ext`` are mandatory. ``proto`` default to ``tcp`` and ``ip`` to ``null`` (i.e. all interfaces)
 
     ``proto`` can be ``tcp`` or ``udp``.
-- ``"volumes": [{"from": "host/path/", "to": "/container/path", "ro": true}, ...]``
+- ``"volumes": [{"src": "host/path/", "tgt": "/container/path", "ro": true}, ...]``
 
   Specifies a volume for the container.
 
-  - ``to`` is mandatory and specifies the *absolute* path of the volume inside the container.
-  - ``from`` is optional. If you specify it, Docker will mount a host directory as container volume.
+  - ``tgt`` is mandatory and specifies the *absolute* path of the volume inside the container.
+  - ``src`` is optional. If you specify it, Docker will mount a host directory as container volume.
 
     If the path is relative (i.e. doesn't start with a ``/``), rocker will rewrite it to
     ``/docker/{containerName}/{relPath}`` and create that directory if necessary.
     It defaults to ``null``.
 
-  - ``ro`` can be specified for host based volumes (in conjunction with ``from``) and allows you
+  - ``ro`` can be specified for host based volumes (in conjunction with ``src``) and allows you
     to mount host directories in read only mode. It defaults to ``false``.
 - ``"volumesFrom": ["otherContainer", ...]``
 
