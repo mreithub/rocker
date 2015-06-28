@@ -5,7 +5,9 @@
 # try 'rocker help' for usage information.
 #
 
-from rocker import container
+from rocker import container, restclient
+from rocker.docker import DockerClient
+
 
 import sys
 
@@ -34,6 +36,7 @@ def usage(errMsg=None):
 		sys.exit(1)
 
 def main():
+	docker = DockerClient()
 	try:
 		if len(sys.argv) <= 1:
 			usage("Missing command!")
@@ -44,7 +47,7 @@ def main():
 		elif cmd == 'build':
 			if len(sys.argv) != 3:
 				usage("'build' expects exactly one argument (the image path)")
-			image.build(sys.argv[2])
+			image.build(sys.argv[2], docker=docker)
 		elif cmd == 'create':
 			if len(sys.argv) != 3:
 				usage("'create' expects exactly one argument (container name/.rocker file)")
@@ -55,7 +58,7 @@ def main():
 			if name.endswith('.rocker'):
 				name = name[:-7]
 
-			container.create(name)
+			container.create(name, docker=docker)
 		elif cmd == 'run':
 			if len(sys.argv) != 3:
 				usage("'run' expects exactly one argument (the container name)")
@@ -65,10 +68,14 @@ def main():
 			if name.endswith('.rocker'):
 				name = name[:-7]
 
-			container.run(name)
+			container.run(name, docker=docker)
 		else:
 			usage("Unknown command: '{0}'".format(cmd))
+	except restclient.HttpResponseError as e:
+		docker.printDockerMessage({'error': "Docker error (code: {0}): {1}".format(e.getCode(), str(e.getData(), "utf8"))})
+		return 1
 	except BaseException as e:
+		# print local vars (for easier debugging)
 		exc_type, exc_value, tb = sys.exc_info()
 		if tb is not None:
 			prev = tb
@@ -77,4 +84,6 @@ def main():
 				prev = curr
 				curr = curr.tb_next
 			print("LocalVars: {0}".format(prev.tb_frame.f_locals))
+
+		# reraise exception
 		raise e
