@@ -1,5 +1,6 @@
 rocker.egg-info
 *.pyc
+.rockerBuild
 
 .kdev4/
 rocker.kdev4
