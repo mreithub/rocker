@@ -212,4 +212,4 @@ FAQ
 
 .. _postgres: https://github.com/mreithub/rocker/tree/master/examples/postgres
 .. _wordpress: https://github.com/mreithub/rocker/tree/master/examples/wordpress
-.. _php: https://github.com/mreithub/rocker/tree/master/examples/php
+.. _php: https://github.com/mreithub/rocker/tree/master/examples/phpApp
