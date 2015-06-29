@@ -1,6 +1,6 @@
 
 from io import BytesIO
-from rocker.docker import DockerClient
+from rocker.rocker import Rocker
 from rocker.restclient import HttpResponseError
 
 import json
@@ -87,7 +87,7 @@ class TagFile:
 # whose mtime will be set to that of the newest file in the directory.
 #
 # This allows us to quickly decide whether an image rebuild is necessary.
-def build(imagePath, docker=DockerClient()):
+def build(imagePath, rocker=Rocker()):
 	tagFile = TagFile(imagePath)
 
 	dockerFile = parseDockerfile(imagePath)
@@ -98,37 +98,37 @@ def build(imagePath, docker=DockerClient()):
 
 	imgInfo = inspect(imagePath)
 
-	# If docker knows nothing about the image, build it even if there's a .rockerBuild file
+	# If docker doesn't have the image, build it even if there's a .rockerBuild file
 	if imgInfo != None and tagFile.check():
 		# nothing seems to have changed => skip building this image
-		docker.debug(1, "Not building image '{0}' - nothing changed\n".format(imagePath), duplicateId=(imagePath,'build'))
+		rocker.debug(1, "Not building image '{0}' - nothing changed\n".format(imagePath), duplicateId=(imagePath,'build'))
 		return
 
-	docker.info("Building image: {0}".format(imagePath))
+	rocker.info("Building image: {0}".format(imagePath))
 
 	# initiate build
-	with docker.createRequest().doPost('/build?rm=1&t={0}'.format(imagePath)) as req:
+	with rocker.createRequest().doPost('/build?rm=1&t={0}'.format(imagePath)) as req:
 		req.enableChunkedMode()
 		tar = tarfile.open(mode='w', fileobj=req)
 		_fillTar(tar, imagePath)
 		resp = req.send()
-		docker.printDockerOutput(resp)
+		rocker.printDockerOutput(resp)
 
 	# update mtime
 	tagFile.update()
 
 # Returns whether or not the given image exists locally
-def exists(imageName, docker=DockerClient()):
-	return inspect(imageName, docker) != None
+def exists(imageName, rocker=Rocker()):
+	return inspect(imageName, rocker) != None
 
 def existsInProject(imageName):
 	return os.path.isfile(os.path.join(imageName, 'Dockerfile'))
 
 # Returns detailed information about the given image (or None if not found)
-def inspect(imageName, docker=DockerClient()):
+def inspect(imageName, rocker=Rocker()):
 	rc = None
 
-	with docker.createRequest() as req:
+	with rocker.createRequest() as req:
 		try:
 			rc = Image(req.doGet('/images/{0}/json'.format(imageName)).send().getObject())
 
@@ -140,9 +140,9 @@ def inspect(imageName, docker=DockerClient()):
 	return rc
 
 # Returns a list of all local docker images
-def list(docker=DockerClient()):
+def list(rocker=Rocker()):
 	rc = []
-	with docker.createRequest() as req:
+	with rocker.createRequest() as req:
 		for data in req.doGet('/images/json').send():
 			rc.append(Image(data))
 	return rc
@@ -172,10 +172,10 @@ def parseDockerfile(path):
 		'Parent': parentImage
 	})
 
-def pull(name, docker=DockerClient()):
-	with docker.createRequest() as req:
+def pull(name, rocker=Rocker()):
+	with rocker.createRequest() as req:
 		resp = req.doPost('/images/create?fromImage={0}%3Alatest'.format(name)).send(data=None)
-		docker.printDockerOutput(resp)
+		rocker.printDockerOutput(resp)
 
 # Adds all files in a directory to the specified tarfile object
 # 

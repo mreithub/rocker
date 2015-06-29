@@ -6,7 +6,7 @@
 #
 
 from rocker import container, restclient
-from rocker.docker import DockerClient
+from rocker.rocker import Rocker
 
 import sys
 
@@ -35,10 +35,10 @@ def usage(errMsg=None):
 		sys.exit(1)
 
 def main():
-	docker = DockerClient()
+	rocker = Rocker()
 
 	try:
-		args = docker.getopt()
+		args = rocker.getopt()
 
 		if len(args) < 1:
 			usage("Missing command!")
@@ -49,7 +49,7 @@ def main():
 		elif cmd == 'build':
 			if len(args) != 2:
 				usage("'build' expects exactly one argument (the image path)")
-			image.build(args[1], docker=docker)
+			image.build(args[1], rocker=rocker)
 		elif cmd == 'create':
 			if len(args) != 2:
 				usage("'create' expects exactly one argument (container name/.rocker file)")
@@ -60,7 +60,7 @@ def main():
 			if name.endswith('.rocker'):
 				name = name[:-7]
 
-			container.create(name, docker=docker)
+			container.create(name, rocker=rocker)
 		elif cmd == 'run':
 			if len(args) != 2:
 				usage("'run' expects exactly one argument (the container name)")
@@ -70,11 +70,11 @@ def main():
 			if name.endswith('.rocker'):
 				name = name[:-7]
 
-			container.run(name, docker=docker)
+			container.run(name, rocker=rocker)
 		else:
 			usage("Unknown command: '{0}'".format(cmd))
 	except restclient.HttpResponseError as e:
-		docker.printDockerMessage({'error': "Docker error (code: {0}): {1}".format(e.getCode(), str(e.getData(), "utf8"))})
+		rocker.printDockerMessage({'error': "Docker error (code: {0}): {1}".format(e.getCode(), str(e.getData(), "utf8"))})
 		return 1
 	except BaseException as e:
 		# print local vars (for easier debugging)

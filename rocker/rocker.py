@@ -17,9 +17,9 @@ class Col:
 	BOLD = '\033[1m'
 	UNDERLINE = '\033[4m'
 
-# Slim wrapper around RestClient with the default url set
-class DockerClient:
-	# DockerClient constructor
+# rocker boilerplate class
+class Rocker:
+	# Rocker constructor
 	#
 	# The URL can be either a UNIX socket or an HTTP/HTTPS server address, e.g:
 	#

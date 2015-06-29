@@ -1,5 +1,5 @@
 from rocker import image
-from rocker.docker import DockerClient
+from rocker.rocker import Rocker
 from rocker.restclient import HttpResponseError
 
 import json
@@ -267,34 +267,34 @@ class RockerFile:
 		with open(path) as f:
 			return json.loads(f.read())
 
-def create(name, docker=DockerClient()):
+def create(name, rocker=Rocker()):
 	config = RockerFile(name)
 
 	# check if the image is part of the project and if it needs to be built
 	if image.existsInProject(config.image):
-		image.build(config.image, docker)
+		image.build(config.image, rocker)
 
 	# check container dependencies (and rebuild them)
 	for d in config.depends.keys():
 		# it seems that for docker links to work properly the containers have to be started at least once.
 		# For simplicity, we'll start them now
-		run(d, docker)
+		run(d, rocker)
 
 	# check if the container still uses the most recent image
-	if isCurrent(name, config.image, pullImage=True, docker=docker):
-		docker.debug(1, "Not creating '{0}' - nothing changed".format(name), duplicateId=(name,'create'))
+	if isCurrent(name, config.image, pullImage=True, rocker=rocker):
+		rocker.debug(1, "Not creating '{0}' - nothing changed".format(name), duplicateId=(name,'create'))
 		return
 
-	docker.info("Creating container: {0}".format(name), duplicateId=(name,'create'))
+	rocker.info("Creating container: {0}".format(name), duplicateId=(name,'create'))
 
 	# (re)build image if necessary
 	if os.path.exists('{0}/Dockerfile'):
 		# seems to be a local image => try to (re)build it
-		image.build(config.image, docker)
+		image.build(config.image, rocker)
 
 	# TODO if the container is already running, it should be stopped. But is that always what we want?
 
-	with docker.createRequest().doPost('/containers/create?name={0}'.format(name)) as req:
+	with rocker.createRequest().doPost('/containers/create?name={0}'.format(name)) as req:
 		resp = req.send(config.toApiJson()).getObject()
 		if 'Warnings' in resp and resp['Warnings'] != None:
 			for w in resp['Warnings']:
@@ -305,10 +305,10 @@ def create(name, docker=DockerClient()):
 		return resp['Id']
 
 # Returns detailed information about the given image (or None if not found)
-def inspect(containerName, docker=DockerClient()):
+def inspect(containerName, rocker=Rocker()):
 	rc = None
 
-	with docker.createRequest() as req:
+	with rocker.createRequest() as req:
 		try:
 			rc = Container(req.doGet('/containers/{0}/json'.format(containerName)).send().getObject())
 		except HttpResponseError as e:
@@ -320,12 +320,12 @@ def inspect(containerName, docker=DockerClient()):
 	return rc
 
 # checks whether a container uses the current version of the underlying image
-def isCurrent(containerName, imageName, pullImage=True, docker=DockerClient()):
+def isCurrent(containerName, imageName, pullImage=True, rocker=Rocker()):
 	ctrInfo = inspect(containerName)
 	imgInfo = image.inspect(imageName)
 
 	if imgInfo == None and pullImage == True:
-		image.pull(imageName, docker)
+		image.pull(imageName, rocker)
 		imgInfo = image.inspect(imageName)
 
 	if imgInfo == None:
@@ -341,20 +341,20 @@ def isCurrent(containerName, imageName, pullImage=True, docker=DockerClient()):
 	# newer versions of an image will get a new Id
 	return ctrInfo.image == imgInfo.id
 
-def run(containerName, docker=DockerClient()):
-	create(containerName, docker)
+def run(containerName, rocker=Rocker()):
+	create(containerName, rocker)
 
 	info = inspect(containerName)
 	if info.isRunning():
-		docker.debug(1, "Not starting {0} - already running".format(containerName), duplicateId=(containerName,'run'))
+		rocker.debug(1, "Not starting {0} - already running".format(containerName), duplicateId=(containerName,'run'))
 		return
 
-	docker.info("Starting container: {0}".format(containerName), duplicateId=(containerName,'run'))
+	rocker.info("Starting container: {0}".format(containerName), duplicateId=(containerName,'run'))
 
 	config = RockerFile(containerName)
 
 	for d in config.depends:
-		run(d, docker)
+		run(d, rocker)
 
-	with docker.createRequest() as req:
+	with rocker.createRequest() as req:
 		req.doPost('/containers/{0}/start'.format(containerName)).send()
