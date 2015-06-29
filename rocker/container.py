@@ -272,23 +272,25 @@ def create(name, docker=DockerClient()):
 
 	# check if the image is part of the project and if it needs to be built
 	if image.existsInProject(config.image):
-		image.build(config.image)
+		image.build(config.image, docker)
 
 	# check container dependencies (and rebuild them)
 	for d in config.depends.keys():
 		# it seems that for docker links to work properly the containers have to be started at least once.
 		# For simplicity, we'll start them now
-		run(d)
+		run(d, docker)
 
 	# check if the container still uses the most recent image
 	if isCurrent(name, config.image, pullImage=True, docker=docker):
-		print("Not creating '{0}' - nothing changed".format(name))
+		docker.debug(1, "Not creating '{0}' - nothing changed".format(name), duplicateId=(name,'create'))
 		return
+
+	docker.info("Creating container: {0}".format(name), duplicateId=(name,'create'))
 
 	# (re)build image if necessary
 	if os.path.exists('{0}/Dockerfile'):
 		# seems to be a local image => try to (re)build it
-		image.build(config.image)
+		image.build(config.image, docker)
 
 	# TODO if the container is already running, it should be stopped. But is that always what we want?
 
@@ -340,17 +342,19 @@ def isCurrent(containerName, imageName, pullImage=True, docker=DockerClient()):
 	return ctrInfo.image == imgInfo.id
 
 def run(containerName, docker=DockerClient()):
-	create(containerName)
+	create(containerName, docker)
 
 	info = inspect(containerName)
 	if info.isRunning():
-		print("Not starting {0} - already running".format(containerName))
+		docker.debug(1, "Not starting {0} - already running".format(containerName), duplicateId=(containerName,'run'))
 		return
+
+	docker.info("Starting container: {0}".format(containerName), duplicateId=(containerName,'run'))
 
 	config = RockerFile(containerName)
 
 	for d in config.depends:
-		run(d)
+		run(d, docker)
 
 	with docker.createRequest() as req:
 		req.doPost('/containers/{0}/start'.format(containerName)).send()

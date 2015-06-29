@@ -101,10 +101,10 @@ def build(imagePath, docker=DockerClient()):
 	# If docker knows nothing about the image, build it even if there's a .rockerBuild file
 	if imgInfo != None and tagFile.check():
 		# nothing seems to have changed => skip building this image
-		sys.stderr.write("Not building image '{0}' - nothing changed\n".format(imagePath))
+		docker.debug(1, "Not building image '{0}' - nothing changed\n".format(imagePath), duplicateId=(imagePath,'build'))
 		return
 
-	docker.printDockerMessage({'status': "Building image {0}".format(imagePath)})
+	docker.info("Building image: {0}".format(imagePath))
 
 	# initiate build
 	with docker.createRequest().doPost('/build?rm=1&t={0}'.format(imagePath)) as req:
