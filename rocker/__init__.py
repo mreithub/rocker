@@ -8,7 +8,6 @@
 from rocker import container, restclient
 from rocker.docker import DockerClient
 
-
 import sys
 
 # print usage information
@@ -37,22 +36,25 @@ def usage(errMsg=None):
 
 def main():
 	docker = DockerClient()
+
 	try:
-		if len(sys.argv) <= 1:
+		args = docker.getopt()
+
+		if len(args) < 1:
 			usage("Missing command!")
-		cmd = sys.argv[1]
+		cmd = args[0]
 
 		if cmd == 'help':
 			usage()
 		elif cmd == 'build':
-			if len(sys.argv) != 3:
+			if len(args) != 2:
 				usage("'build' expects exactly one argument (the image path)")
-			image.build(sys.argv[2], docker=docker)
+			image.build(args[1], docker=docker)
 		elif cmd == 'create':
-			if len(sys.argv) != 3:
+			if len(args) != 2:
 				usage("'create' expects exactly one argument (container name/.rocker file)")
 
-			name = sys.argv[2]
+			name = args[1]
 
 			#container.create expects a container name as parameter => strip the extension
 			if name.endswith('.rocker'):
@@ -60,9 +62,9 @@ def main():
 
 			container.create(name, docker=docker)
 		elif cmd == 'run':
-			if len(sys.argv) != 3:
+			if len(args) != 2:
 				usage("'run' expects exactly one argument (the container name)")
-			name = sys.argv[2]
+			name = args[1]
 
 			#container.run expects a container name as parameter => strip the extension
 			if name.endswith('.rocker'):

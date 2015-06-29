@@ -1,5 +1,6 @@
 from rocker.restclient import Request
 
+import getopt
 import json
 import os
 import sys
@@ -42,6 +43,8 @@ class DockerClient:
 
 		self._url = url
 		self._lastMsgId = None
+		self._duplicateIDs = set()
+		self._verbosity = 0
 
 	# Returns a new RestClient instance pointing to the URL given in the constructor
 	def createRequest(self):
@@ -49,6 +52,18 @@ class DockerClient:
 			return Request(self._url)
 		except PermissionError as e:
 			raise PermissionError("Couln't connect to docker at {0}".format(self._url))
+
+	def getopt(self):
+		try:
+			opts, args = getopt.gnu_getopt(sys.argv[1:], 'v')
+
+			for opt,_ in opts:
+				if opt == '-v':
+					self._verbosity += 1
+
+			return args
+		except getopt.GetoptError as e:
+			self.error(e, exitCode=1)
 
 	def printDockerOutput(self, httpResponse):
 		while True:
@@ -101,3 +116,30 @@ class DockerClient:
 		else:
 			self._lastMsgId = None
 
+	def _msg(self, msg, col, duplicateId, stream):
+		if duplicateId != None:
+			# don't print duplicate messages
+			if duplicateId in self._duplicateIDs:
+				return
+			else:
+				self._duplicateIDs.add(duplicateId)
+
+		if col != None:
+			msg="{0}{1}{2}".format(col, msg, Col.ENDC)
+
+		stream.write("{0}\n".format(msg))
+
+
+	def error(self, msg: str, exitCode=None):
+		self._msg("ERROR: {0}".format(msg), Col.FAIL, None, sys.stderr)
+		if exitCode != None:
+			sys.exit(exitCode)
+
+	def info(self, msg: str, duplicateId=None):
+		self._msg(msg, Col.OKGREEN, duplicateId, sys.stdout)
+
+	def debug(self, level, msg, duplicateId=None):
+		if self._verbosity < level:
+			return # too verbose
+
+		self._msg(msg, None, duplicateId, sys.stdout)
