@@ -90,6 +90,8 @@ Description:
 
   It is up to you if you want to use qualified image names (in the format ``user/image``).
   If you do, make sure you have a your directory structure set up accordingly.
+  
+  Note: Docker expects image names to follow the following format: ``[a-z0-9-_.]+``
 
 - ``"env": {...}``
 
@@ -135,7 +137,7 @@ Description:
     to mount host directories in read only mode. It defaults to ``false``.
 - ``"volumesFrom": ["otherContainer", ...]``
 
-  Mount volumes from another container (see the Docker docs about `data volume containers`_).
+  Mount volumes from another container (see the Docker docs about `data volume container`_).
 
   Can be specified as simple string or as list (i.e. ``"foo"`` is equivalent to ``["foo"]``.
   You can't use that shorthand if you want to use more than one container's volumes).
@@ -162,6 +164,17 @@ Description:
 
   Keep in mind that any other values set directly (all the above) will overwrite values you specify inside ``raw``.
 
+Example projects
+----------------
+
+The following list of example projects is (roughly) sorted by complexity, so if you're looking for a quick way to 
+
+Each example contains a README.md describing the details on what's going on.
+
+- postgres_: Simple Database container project. There's one container for the database process and one as `data volume container`_. No custom images.
+- wordpress_: This project creates a MySQL and a WordPress container. Uses bind mounts for data persistence. No custom images.
+- php_: Simple PHP app, custom Docker image, no persistence.
+- *TODO: add more examples...* 
 
 Background
 ----------
@@ -195,4 +208,8 @@ FAQ
 .. _github: https://github.com/mreithub/rocker
 .. _pypi: https://pypi.python.org/pypi/rocker
 .. _remote api: http://docs.docker.com/reference/api/docker_remote_api_v1.18/
-.. _data volume containers: https://docs.docker.com/userguide/dockervolumes/#creating-and-mounting-a-data-volume-container
+.. _data volume container: https://docs.docker.com/userguide/dockervolumes/#creating-and-mounting-a-data-volume-container
+
+.. _postgres: https://github.com/mreithub/rocker/tree/master/examples/postgres
+.. _wordpress: https://github.com/mreithub/rocker/tree/master/examples/wordpress
+.. _php: https://github.com/mreithub/rocker/tree/master/examples/php

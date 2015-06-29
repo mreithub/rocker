@@ -64,5 +64,9 @@ Simply issue
 
 This will cause rocker to create and start the `blog` and `mysql-wp` containers.
 
+rocker starts both because `mysql-wp` is a dependency of `blog`.
+
+Once the `blog` container is running, visit http://localhost/ to see your new WordPress blog.
+
 [1]: https://registry.hub.docker.com/_/mysql/
 [2]: https://registry.hub.docker.com/_/wordpress/
