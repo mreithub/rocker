@@ -99,12 +99,12 @@ class RockerFile:
 		if self.ports != None:
 			portBindings = {}
 			for port in self.ports:
-				key = "{ext}/{proto}".format(**port)
+				key = "{int}/{proto}".format(**port)
 				extIp = port['extIp']
 				if extIp == None:
 					extIp = ''
 
-				portBindings[key] = [{"HostIp":extIp, "HostPort": str(port['int'])}]
+				portBindings[key] = [{"HostIp":extIp, "HostPort": str(port['ext'])}]
 			hostConfig['PortBindings'] = portBindings
 
 		# volumes
@@ -215,12 +215,13 @@ class RockerFile:
 			rc = []
 			for v in config['volumes']:
 				src = None
-				tgt = v['tgt']
+				tgt = None
 				ro = False
 
 				if type(v) == dict: # format: { "src": "path/to/host/dir", "tgt": "/internal/path", "ro": true }
 					if not 'tgt' in v:
 						raise ValueError("Volume config needs a 'tgt' field!")
+					tgt = v['tgt']
 
 					if 'src' in v:
 						# create host directory if necessary
