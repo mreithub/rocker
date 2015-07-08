@@ -3,4 +3,5 @@ rocker.egg-info
 .rockerBuild
 
 .kdev4/
+.metadata/
 rocker.kdev4
