@@ -99,7 +99,7 @@ class RockerFile:
 			#rc["RestartPolicy"] = <undefined>
 			pass
 		else:
-			raise ValueError("invalid 'restart' policy value in {0}: '{1}'".format(self.name, self.restart) 
+			raise ValueError("invalid 'restart' policy value in {0}: '{1}'".format(self.name, self.restart))
 
 		# links
 		if self.links != None:
