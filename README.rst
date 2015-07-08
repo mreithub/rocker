@@ -78,6 +78,7 @@ The following is a complete example of all supported configuration options:
         "volumesFrom": ["app-data"],
         "cmd": ["echo", "hello world"],
         "entrypoint": ["echo", "foo"],
+        "restart": true,
         "raw": {...}
     }
 
@@ -154,6 +155,16 @@ Description:
 - ``"entrypoint": ["/path/to/command", "arg1", "arg2", ...]``
 
   Similar to ``"cmd": [...]``.
+
+- ``"restart": True``
+
+  Set the restart policy of the container.
+
+  Supported values:
+
+  - ``true``/``"always"`` (default): Tell docker to always restart the container if it exited/crashed as well as when the system boots
+  - ``on-failure``: Only restart the container if it exited with a nonzero exit code.
+  - ``false``: Don't restart the container
 
 - ``"raw": {...}``
 

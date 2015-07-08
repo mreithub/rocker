@@ -50,6 +50,7 @@ class RockerFile:
 		self.links = self._parseLinks(config)
 		self.ports = RockerFile._parsePorts(config)
 		self.raw = RockerFile._getValue(config, 'raw')
+		self.restart = RockerFile._getValue(config, 'restart', defaultValue=True)
 		self.volumes = RockerFile._parseVolumes(config, name)
 		self.volumesFrom = self._parseVolumesFrom(config)
 
@@ -85,6 +86,20 @@ class RockerFile:
 		# entrypoint
 		if self.entrypoint != None:
 			rc["Entrypoint"] = self.entrypoint
+
+		# restart policy
+		if self.restart in [True, "always"]:
+			rc["RestartPolicy"] = "always"
+		elif self.restart == "on-failure":
+			rc["RestartPolicy"] = "on-failure"
+		elif type(self.restart) == int:
+			rc["RestartPolicy"] = "on-failure"
+			rc["MaximumRetryCount"] = self.restart
+		elif self.restart == False:
+			#rc["RestartPolicy"] = <undefined>
+			pass
+		else:
+			raise ValueError("invalid 'restart' policy value in {0}: '{1}'".format(self.name, self.restart) 
 
 		# links
 		if self.links != None:
@@ -134,8 +149,8 @@ class RockerFile:
 		return rc
 
 	@staticmethod
-	def _getValue(data, key, errMsg=None):
-		rc = None
+	def _getValue(data, key, errMsg=None, defaultValue=None):
+		rc = defaultValue
 		if key in data:
 			rc = data[key]
 			del data[key]
