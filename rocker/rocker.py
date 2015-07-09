@@ -79,6 +79,7 @@ class Rocker:
 	def printDockerMessage(self, msgJson):
 		col = None
 		msg = None
+		newline = '\n'
 
 		if 'id' in msgJson:
 			# overwrite lines with the same ID (instead of printing a new one)
@@ -93,6 +94,7 @@ class Rocker:
 		if 'error' in msgJson:
 			col = Col.FAIL
 			msg = msgJson['error']
+			newline=''
 		elif 'status' in msgJson:
 			col = Col.OKBLUE
 			msg = msgJson['status']
@@ -101,6 +103,7 @@ class Rocker:
 				msg = "{0} {1}".format(msgJson['status'], msgJson['progress'])
 		elif 'stream' in msgJson:
 			msg = msgJson['stream']
+			newline=''
 
 		else:
 			msg = ":: {0}".format(msgJson)
@@ -108,7 +111,7 @@ class Rocker:
 		if col != None:
 			msg = "{0}{1}{2}".format(col, msg, Col.ENDC)
 
-		sys.stdout.write("{0}\n".format(msg))
+		sys.stdout.write("{0}{1}".format(msg, newline))
 
 		# update _lastMsgId
 		if 'id' in msgJson:
