@@ -3,6 +3,7 @@ from rocker.restclient import Request
 import getopt
 import json
 import os
+import pkg_resources
 import sys
 
 # Source: https://svn.blender.org/svnroot/bf-blender/trunk/blender/build_files/scons/tools/bcolors.py
@@ -52,6 +53,9 @@ class Rocker:
 			return Request(self._url)
 		except PermissionError as e:
 			raise PermissionError("Couln't connect to docker at {0}".format(self._url))
+
+	def getDockerVersion(self):
+		return self.createRequest().doGet("/version").send().getObject()
 
 	def getopt(self):
 		try:
@@ -118,6 +122,17 @@ class Rocker:
 			self._lastMsgId = msgJson['id']
 		else:
 			self._lastMsgId = None
+
+	def printVersion(self):
+		dockerInfo = self.getDockerVersion()
+		rockerInfo = pkg_resources.require("rocker")[0]
+
+		print("Rocker version: {v}".format(v=rockerInfo.version))
+		print("Docker version: {Version}".format(**dockerInfo))
+		self.debug(1, "Docker API version: {ApiVersion}".format(**dockerInfo))
+		self.debug(1, "Docker Kernel version: {KernelVersion}".format(**dockerInfo))
+		self.debug(2, "Docker GIT revision: {GitCommit}".format(**dockerInfo))
+		self.debug(2, "Docker GO version {GoVersion}".format(**dockerInfo))
 
 	def _msg(self, msg, col, duplicateId, stream):
 		if duplicateId != None:

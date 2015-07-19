@@ -20,6 +20,8 @@ def usage(errMsg=None):
 		out.write("ERROR: {0}\n\n".format(errMsg))
 
 	out.write("""USAGE: {0} <command> [arguments]
+
+COMMANDS:
 	help
 		Prints this information
 	build <image path>
@@ -29,7 +31,14 @@ def usage(errMsg=None):
 		Also will build dependent containers and the underlying images
 		if they have changed.
 	run <container.rocker>
-		Runs the specified container. Will issue build and create first 
+		Runs the specified container. Will issue build and create first.
+	version
+		Prints version information for rocker and the Docker daemon
+		(try -v or -vv to increase detail)
+
+OPTIONS:
+	-v (can be specified multiple times)
+		Increase output verbosity
 """.format(sys.argv[0]))
 	if errMsg != None:
 		sys.exit(1)
@@ -71,6 +80,8 @@ def main():
 				name = name[:-7]
 
 			container.run(name, rocker=rocker)
+		elif cmd == 'version':
+			rocker.printVersion()
 		else:
 			usage("Unknown command: '{0}'".format(cmd))
 	except restclient.HttpResponseError as e:
