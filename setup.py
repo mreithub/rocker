@@ -100,4 +100,6 @@ setup(
             'rocker=rocker:main',
         ],
     },
+
+	test_suite="tests"
 )

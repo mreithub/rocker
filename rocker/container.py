@@ -8,112 +8,213 @@ import sys
 
 # data class representing a Docker container
 class Container:
-	def __init__(self, json):
-		self.id = json['Id']
-		self.image = json['Image']
-		self.command = Container._getValue(json, 'Command')
-		self.created = json['Created']
-		self.state = Container._getValue(json, 'State')
+	class Port:
+		def __init__(self, data):
+			if type(data) == int: # format: 123 (simply a number)
+				self.proto = 'tcp'
+				self.int = data
+				self.ext = data
+				self.extIp = None
+			elif type(data) == dict: # format: {'int': 123, 'ext': 1234, 'extIp': "127.0.0.1", "proto": "tcp"}
+				if not 'int' in data:
+					raise Exception("Missing internal port ('int'): {0}".format(data))
+				if not 'ext' in data:
+					raise Exception("Missing external port ('ext'): {0}".format(data))
+				self.int = data['int']
+				self.ext = data['ext']
 
-	@staticmethod
-	def _getValue(data, key, default=None):
-		if key in data:
-			return data[key]
-		else:
-			return default
+				self.proto = Container._getValue(data, 'proto')
+				self.extIp = Container._getValue(data, 'extIp')
 
-	def isRunning(self):
-		rc = False
+		def toRockerFormat(self):
+			rc = {}
 
-		if 'Running' in self.state:
-			rc = self.state['Running']
+			if self.int == self.ext and self.proto in [None, 'tcp'] and self.extIp == None:
+				rc = self.int
+			else:
+				Container._putValue(rc, 'int', self.int)
+				Container._putValue(rc, 'ext', self.ext)
+				Container._putValue(rc, 'proto', self.proto)
+				Container._putValue(rc, 'extIp', self.extIp)
+			return rc
 
-		return rc
-
-# Converts .rocker files to the docker API format
-class RockerFile:
 	class Volume:
 		def __init__(self, tgt, src=None, ro=False):
 			self.src = src
 			self.tgt = tgt
 			self.ro = ro
 
-	def __init__(self, name):
-		config = RockerFile._readConfig(name)
+		def toRockerFormat(self):
+			rc = {'tgt': self.tgt}
 
-		self.depends = {}
+			if self.src != None:
+				rc['src'] = self.src
+			if self.ro != False:
+				rc['ro'] = self.ro
+			return rc
 
-		self.name = name
-		self.image = RockerFile._getValue(config, 'image', "You need to specify an 'image' for your .rocker container!")
+	def __init__(self):
+		self._id = None
+		self._name = None
+		self._image = None
 
-		self.env = RockerFile._getValue(config, 'env')
-		self.links = self._parseLinks(config)
-		self.ports = RockerFile._parsePorts(config)
-		self.raw = RockerFile._getValue(config, 'raw')
-		self.restart = RockerFile._getValue(config, 'restart', defaultValue=True)
-		self.volumes = RockerFile._parseVolumes(config, name)
-		self.volumesFrom = self._parseVolumesFrom(config)
+		self._created = None
+		self._env = {}
+		self._links = {}
+		self._ports = []
+		self._raw = None
+		self._restart = None
+		self._state = None
+		self._volumes = []
+		self._volumesFrom = None
 
-		self.cmd = RockerFile._getValue(config, 'cmd')
-		self.entrypoint = RockerFile._getValue(config, 'entrypoint')
+		self._cmd = None
+		self._entrypoint = None
+
+		self._depends = set()
+
+	def getId(self):
+		return self._id
+
+	def getImage(self):
+		return self._image
+
+	def getName(self):
+		return self._name
+
+
+	def getCreatedAt(self):
+		return self._created
+
+	def getEnvironment(self):
+		return self._env
+
+	def getLinks(self):
+		return self._links
+
+	def getPorts(self):
+		return self._ports
+
+	def getRawData(self):
+		return self._raw
+
+	def getRestartPolicy(self):
+		return self._restart
+
+	def getState(self):
+		return self._state
+
+	def getVolumes(self):
+		return self._volumes
+
+	def getVolumesFrom(self):
+		return self._volumesFrom
+
+
+	def getDependencies(self):
+		return self._depends
+
+	# Create a Container object from Docker's remote API format
+	@staticmethod
+	def fromApiJson(json):
+		json = dict(json) # copy data (as _getValue() will mutate its contents)
+		rc = Container()
+		rc._id = json['Id']
+		rc._name = Container._getValue(json, 'Name')
+		rc._image = json['Image']
+
+		rc._created = json['Created'] # TODO parse date
+		rc._state = Container._getValue(json, 'State') # TODO parse value map
+
+		if 'Config' in json and 'Env' in json['Config']:
+			# environment variables
+			rc._env = {}
+			for e in json['Config']['Env']:
+				var, value = e.split('=', 1)
+				rc._env[var] = value
+
+		# TODO parse links
+		# TODO parse ports
+		# TODO parse restart policy
+		# TODO parse volumes
+		# TODO parse volumesFrom
+
+		# TODO init dependencies
+
+		rc._cmd = Container._getValue(json, 'Cmd')
+		rc._entrypoint = Container._getValue(json, 'Entrypoint')
+
+		return rc
+
+	@staticmethod
+	def fromRockerFile(name):
+		config = Container._readConfig(name)
+		return Container.fromRockerConfig(name, config)
+
+	@staticmethod
+	def fromRockerConfig(name, config):
+		rc = Container()
+
+		rc._name = name
+		rc._image = Container._getValue(config, 'image', "You need to specify an 'image' for your .rocker container!")
+
+		rc._env = Container._getValue(config, 'env')
+		rc._links = rc._parseLinks(config)
+		rc._ports = Container._parsePorts(config)
+		rc._raw = Container._getValue(config, 'raw')
+		rc._restart = Container._getValue(config, 'restart', defaultValue=True)
+		rc._volumes = Container._parseVolumes(config, name)
+		rc._volumesFrom = rc._parseVolumesFrom(config)
+
+		rc._cmd = Container._getValue(config, 'cmd')
+		rc._entrypoint = Container._getValue(config, 'entrypoint')
 
 		# all the remaining keys in data are unsupporyed => issue warnings
 		for key in config.keys():
 			sys.stderr.write("WARNING: unsupported .rocker key: '{0}'\n".format(key))
+
+		return rc
+
+	def isRunning(self):
+		rc = False
+
+		if 'Running' in self._state:
+			rc = self._state['Running']
+
+		return rc
 
 	def toApiJson(self):
 		rc = {}
 		hostConfig = {}
 
 		# non-raw entries override raw ones => seed from raw first
-		if self.raw != None:
-			rc = self.raw;
+		if self._raw != None:
+			rc = self._raw;
 
-		# image
-		rc['Image'] = self.image
-
+		Container._putValue(rc, "Image", self._image)
+		Container._putValue(rc, "Cmd", self._cmd)
+		Container._putValue(rc, "Entrypoint", self._entrypoint)
+		
 		# env
-		if self.env != None:
+		if self._env != None:
 			env = []
-			for key, value in self.env.items():
+			for key, value in self._env.items():
 				env.append("{0}={1}".format(key, value))
 			rc['Env'] = env
 
-		# cmd
-		if self.cmd != None:
-			rc["Cmd"] = self.cmd
-
-		# entrypoint
-		if self.entrypoint != None:
-			rc["Entrypoint"] = self.entrypoint
-
-		# restart policy
-		if self.restart in [True, "always"]:
-			rc["RestartPolicy"] = "always"
-		elif self.restart == "on-failure":
-			rc["RestartPolicy"] = "on-failure"
-		elif type(self.restart) == int:
-			rc["RestartPolicy"] = "on-failure"
-			rc["MaximumRetryCount"] = self.restart
-		elif self.restart == False:
-			#rc["RestartPolicy"] = <undefined>
-			pass
-		else:
-			raise ValueError("invalid 'restart' policy value in {0}: '{1}'".format(self.name, self.restart))
-
 		# links
-		if self.links != None:
+		if self._links != None:
 			# convert the {'alias': 'containerName', ...} format to ["containerName:alias"]
 			links = []
 			
-			for alias, containerName in self.links.items():
+			for alias, containerName in self._links.items():
 				links.append("{0}:{1}".format(containerName, alias))
 			hostConfig['links'] = links
 
 		# ports
-		if self.ports != None:
+		if self._ports != None:
 			portBindings = {}
-			for port in self.ports:
+			for port in self._ports:
 				key = "{int}/{proto}".format(**port)
 				extIp = port['extIp']
 				if extIp == None:
@@ -123,10 +224,10 @@ class RockerFile:
 			hostConfig['PortBindings'] = portBindings
 
 		# volumes
-		if self.volumes != None:
+		if self._volumes != None:
 			volumeList = {}
 			bindList = []
-			for volume in self.volumes:
+			for volume in self._volumes:
 				# docker distinguishes between host volumes (aka 'binds') and internal volumes
 				if volume.src != None:
 					# bind mount
@@ -144,9 +245,78 @@ class RockerFile:
 			if len(bindList) > 0:
 				hostConfig['Binds'] = bindList
 
+		# restart policy
+		restartPolicy = {}
+		if self._restart in [True, "always"]:
+			restartPolicy["Name"] = "always"
+		elif self._restart == "on-failure":
+			restartPolicy["Name"] = "on-failure"
+		elif type(self._restart) == int:
+			restartPolicy = {"Name": "on-failure", "MaximumRetryCount": self._restart}
+		elif self._restart == False:
+			restartPolicy = None
+			pass
+		else:
+			raise ValueError("invalid 'restart' policy value in {0}: '{1}'".format(self._name, self._restart))
+
+		Container._putValue(hostConfig, "RestartPolicy", restartPolicy)
+
 		rc['HostConfig'] = hostConfig
 
 		return rc
+
+	# Creates a rocker file from the information stored inside the Container object.
+	# If outFile is None, this method will simply return a dict() object which can then be converted to JSON
+	# You can specify outFile as file-like object or as path string
+	#
+	# Keep in mind that this method doesn't resolve image IDs to image names and might contain information that's been
+	# automatically generated (i.e. environment variables).
+	#
+	# So while it's possible to create .rocker files out of existing containers, you shouldn't rely on them being perfect.
+	def toRockerFile(self, outFile=None):
+		data = {}
+
+		data['image'] = self._image
+
+		Container._putValue(data, 'raw', self._raw)
+
+		Container._putValue(data, 'env', self._env)
+		Container._putValue(data, 'cmd', self._cmd)
+		Container._putValue(data, 'entrypoint', self._entrypoint)
+
+		if self._restart not in [True, 'always']: 
+			Container._putValue(data, 'restart', self._restart)
+
+		# links
+		links = []
+		for alias, ctrName in self._links.items():
+			if alias == ctrName:
+				links.append(ctrName)
+			else:
+				links.append("{0}:{1}".format(ctrName, alias))
+		Container._putValue(data, 'links', links)
+
+		# ports
+		ports = []
+		for p in self._ports:
+			ports.append(p.toRockerFormat())
+		Container._putValue(data, 'ports', ports)
+
+		# volumes
+		volumes = []
+		for v in self._volumes:
+			volumes.append(v.toRockerFormat())
+
+		Container._putValue(data, 'volumes', volumes)
+		Container._putValue(data, 'volumesFrom', self._volumesFrom)
+
+		if outFile == None:
+			return data
+		elif type(outFile) == str:
+			with open(outFile, 'w') as f:
+				json.dump(data, outFile)
+		else:
+			json.dump(data, outFile)
 
 	@staticmethod
 	def _getValue(data, key, errMsg=None, defaultValue=None):
@@ -163,19 +333,20 @@ class RockerFile:
 		if not os.path.isdir(path):
 			os.makedirs(path)
 
+	# Parse links in a .rocker file
 	def _parseLinks(self, config):
-		rc = None
+		rc = {}
 
 		if 'links' in config:
 			# we want links to be in the format {"alias": "containerName", ...}
-			links = RockerFile._getValue(config, 'links')
-			if type(links) == list: # [ "containerName:alias", ... ]
+			links = Container._getValue(config, 'links')
+			if type(links) == list: # [ "container1", "container2:alias", ... ]
 				# parse each item and add them to the list
 				realLinks = {}
 				for v in links:
 					v = v.split(':', maxsplit=1)
 					if len(v) == 1:
-						v.append(v[0]) # duplicate item
+						v.append(v[0]) # alias=containerName
 					realLinks[v[1]] = v[0]
 				rc = realLinks
 
@@ -186,13 +357,14 @@ class RockerFile:
 
 			# add links to dependencies (to be able to (re-)build them if necessary)
 			for container in rc.values():
-				self.depends[container] = None
+				self._depends.add(container)
 
 		return rc
 
+	# Parse ports specified in a .rocker file
 	# expected format is one of:
 	# - [ 123, 456, 789, ... ]
-	# - [ {proto:tcp, int:123, ext:2123, extIp:...}, ...] <- that's how we store it internally
+	# - [ {proto:tcp, int:123, ext:2123, extIp:...}, ...] <- that's how we store them internally
 	@staticmethod
 	def _parsePorts(config):
 		rc = []
@@ -203,19 +375,7 @@ class RockerFile:
 			raise Exception("Expected a port list!")
 		else:
 			for port in config['ports']:
-				if type(port) == int: # format: 123 (simply a number)
-					rc.append({'proto': 'tcp', 'int': port, 'ext': port, 'extIp': None})
-				elif type(port) == dict: # format: {'int': 123, 'ext': 1234, 'extIp': "127.0.0.1", "proto": "tcp"}
-					if not 'int' in port:
-						raise Exception("Missing internal port ('int'): {0}".format(port))
-					if not 'ext' in port:
-						raise Exception("Missing external port ('ext'): {0}".format(port))
-					if not 'proto' in port:
-						port['proto'] = 'tcp'
-					if not 'extIp' in port:
-						port['extIp'] = None
-
-					rc.append(port)
+				rc.append(Container.Port(port))
 
 			del config['ports']
 
@@ -224,10 +384,9 @@ class RockerFile:
 	# returns a list of Volume objects (with .src, .tgt and .ro properties)
 	@staticmethod
 	def _parseVolumes(config, containerName):
-		rc = None
+		rc = []
 
 		if 'volumes' in config:
-			rc = []
 			for v in config['volumes']:
 				src = None
 				tgt = None
@@ -241,7 +400,7 @@ class RockerFile:
 					if 'src' in v:
 						# create host directory if necessary
 						srcPath = os.path.join('/docker', containerName, v['src'])
-						RockerFile._mkdirs(srcPath)
+						Container._mkdirs(srcPath)
 						src = srcPath
 
 					if 'ro' in v and v['ro'] == True:
@@ -250,7 +409,7 @@ class RockerFile:
 				else: # format: "/internal/path"
 					tgt = v
 
-				rc.append(RockerFile.Volume(tgt, src, ro))
+				rc.append(Container.Volume(tgt, src, ro))
 			del config['volumes']
 
 		return rc
@@ -265,11 +424,15 @@ class RockerFile:
 
 			# add containers to dependencies
 			for container in rc:
-				self.depends[container] = None
+				self._depends.add(container)
 
 			del config['volumesFrom']
 
 		return rc
+
+	def _putValue(data, key, value):
+		if value not in [None, [], {}]:
+			data[key] = value
 
 	@staticmethod
 	def _readConfig(name):
@@ -278,26 +441,26 @@ class RockerFile:
 		if os.path.exists("{0}.rocker".format(name)):
 			path = "{0}.rocker".format(name)
 		else:
-			raise FileNotFoundError("Container contiguration not found: '{0}'".format(name))
+			raise FileNotFoundError("Container configuration not found: '{0}'".format(name))
 
 		with open(path) as f:
 			return json.loads(f.read())
 
 def create(name, rocker=Rocker()):
-	config = RockerFile(name)
+	config = Container.fromRockerFile(name)
 
 	# check if the image is part of the project and if it needs to be built
-	if image.existsInProject(config.image):
-		image.build(config.image, rocker)
+	if image.existsInProject(config.getImage()):
+		image.build(config.getImage(), rocker)
 
 	# check container dependencies (and rebuild them)
-	for d in config.depends.keys():
+	for d in config.getDependencies():
 		# it seems that for docker links to work properly the containers have to be started at least once.
 		# For simplicity, we'll start them now
 		run(d, rocker)
 
 	# check if the container still uses the most recent image
-	if isCurrent(name, config.image, pullImage=True, rocker=rocker):
+	if isCurrent(name, config.getImage(), pullImage=True, rocker=rocker):
 		rocker.debug(1, "Not creating '{0}' - nothing changed".format(name), duplicateId=(name,'create'))
 		return
 
@@ -306,7 +469,7 @@ def create(name, rocker=Rocker()):
 	# (re)build image if necessary
 	if os.path.exists('{0}/Dockerfile'):
 		# seems to be a local image => try to (re)build it
-		image.build(config.image, rocker)
+		image.build(config.getImage(), rocker)
 
 	# TODO if the container is already running, it should be stopped. But is that always what we want?
 
@@ -326,7 +489,7 @@ def inspect(containerName, rocker=Rocker()):
 
 	with rocker.createRequest() as req:
 		try:
-			rc = Container(req.doGet('/containers/{0}/json'.format(containerName)).send().getObject())
+			rc = Container.fromApiJson(req.doGet('/containers/{0}/json'.format(containerName)).send().getObject())
 		except HttpResponseError as e:
 			if e.getCode() == 404:
 				pass # return None
@@ -355,7 +518,7 @@ def isCurrent(containerName, imageName, pullImage=True, rocker=Rocker()):
 		raise Exception("Unknown image: {0}", imageName)
 
 	# newer versions of an image will get a new Id
-	return ctrInfo.image == imgInfo.id
+	return ctrInfo.getImage() == imgInfo.id
 
 def run(containerName, rocker=Rocker()):
 	create(containerName, rocker)
@@ -367,9 +530,9 @@ def run(containerName, rocker=Rocker()):
 
 	rocker.info("Starting container: {0}".format(containerName), duplicateId=(containerName,'run'))
 
-	config = RockerFile(containerName)
+	config = Container.fromRockerFile(containerName)
 
-	for d in config.depends:
+	for d in config.getDependencies():
 		run(d, rocker)
 
 	with rocker.createRequest() as req:
