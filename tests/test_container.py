@@ -56,6 +56,10 @@ class ContainerTest(TestCase):
 
 			newCfg = Container.fromRockerConfig("abc", dict(cfg)).toRockerFile()
 
+			# sort links (we don't care about their order and Container might have reordered them)
+			cfg['links'].sort()
+			newCfg['links'].sort()
+
 			self.assertEqual(cfg, newCfg)
 		finally:
 			Container._mkdirs = originalMkdirs
