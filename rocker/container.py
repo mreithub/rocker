@@ -215,12 +215,12 @@ class Container:
 		if self._ports != None:
 			portBindings = {}
 			for port in self._ports:
-				key = "{int}/{proto}".format(**port)
-				extIp = port['extIp']
+				key = "{int}/{proto}".format(int=port.int, proto=port.proto)
+				extIp = port.extIp
 				if extIp == None:
 					extIp = ''
 
-				portBindings[key] = [{"HostIp":extIp, "HostPort": str(port['ext'])}]
+				portBindings[key] = [{"HostIp":extIp, "HostPort": str(port.ext)}]
 			hostConfig['PortBindings'] = portBindings
 
 		# volumes
@@ -446,43 +446,6 @@ class Container:
 		with open(path) as f:
 			return json.loads(f.read())
 
-def create(name, rocker=Rocker()):
-	config = Container.fromRockerFile(name)
-
-	# check if the image is part of the project and if it needs to be built
-	if image.existsInProject(config.getImage()):
-		image.build(config.getImage(), rocker)
-
-	# check container dependencies (and rebuild them)
-	for d in config.getDependencies():
-		# it seems that for docker links to work properly the containers have to be started at least once.
-		# For simplicity, we'll start them now
-		run(d, rocker)
-
-	# check if the container still uses the most recent image
-	if isCurrent(name, config.getImage(), pullImage=True, rocker=rocker):
-		rocker.debug(1, "Not creating '{0}' - nothing changed".format(name), duplicateId=(name,'create'))
-		return
-
-	rocker.info("Creating container: {0}".format(name), duplicateId=(name,'create'))
-
-	# (re)build image if necessary
-	if os.path.exists('{0}/Dockerfile'):
-		# seems to be a local image => try to (re)build it
-		image.build(config.getImage(), rocker)
-
-	# TODO if the container is already running, it should be stopped. But is that always what we want?
-
-	with rocker.createRequest().doPost('/containers/create?name={0}'.format(name)) as req:
-		resp = req.send(config.toApiJson()).getObject()
-		if 'Warnings' in resp and resp['Warnings'] != None:
-			for w in resp['Warnings']:
-				sys.stderr.write("WARNING: {0}\n".format(w))
-		if not 'Id' in resp:
-			raise Exception("Missing 'Id' in docker response!")
-
-		return resp['Id']
-
 # Returns detailed information about the given image (or None if not found)
 def inspect(containerName, rocker=Rocker()):
 	rc = None
@@ -520,20 +483,59 @@ def isCurrent(containerName, imageName, pullImage=True, rocker=Rocker()):
 	# newer versions of an image will get a new Id
 	return ctrInfo.getImage() == imgInfo.id
 
-def run(containerName, rocker=Rocker()):
-	create(containerName, rocker)
+def _create(containerName, config, rocker):
+	with rocker.createRequest().doPost('/containers/create?name={0}'.format(containerName)) as req:
+		resp = req.send(config.toApiJson()).getObject()
+		if 'Warnings' in resp and resp['Warnings'] != None:
+			for w in resp['Warnings']:
+				sys.stderr.write("WARNING: {0}\n".format(w))
+		if not 'Id' in resp:
+			raise Exception("Missing 'Id' in docker response!")
 
+def _run(containerName, rocker):
 	info = inspect(containerName)
-	if info.isRunning():
+	if not info.isRunning():
+		rocker.info("Starting container: {0}".format(containerName), duplicateId=(containerName,'run'))
+
+		with rocker.createRequest() as req:
+			req.doPost('/containers/{0}/start'.format(containerName)).send()
+	else:
 		rocker.debug(1, "Not starting {0} - already running".format(containerName), duplicateId=(containerName,'run'))
-		return
 
-	rocker.info("Starting container: {0}".format(containerName), duplicateId=(containerName,'run'))
-
+def run(containerName, rocker=Rocker()):
 	config = Container.fromRockerFile(containerName)
+	rc = False
 
+	# check if the image is part of the project and if it needs to be built
+	if image.existsInProject(config.getImage()):
+		if image.build(config.getImage(), rocker):
+			# image was (re)built -> create container
+			rc = True
+
+	# check container dependencies (and rebuild them)
 	for d in config.getDependencies():
-		run(d, rocker)
+		# it seems that for docker links to work properly the containers have to be started at least once.
+		# Just creating them isn't sufficient
+		if run(d, rocker):
+			# at least one of the dependencies was started => create container
+			rc = True
 
-	with rocker.createRequest() as req:
-		req.doPost('/containers/{0}/start'.format(containerName)).send()
+	# check if the container still uses the most recent image
+	if not isCurrent(containerName, config.getImage(), pullImage=True, rocker=rocker):
+		rc = True
+
+	if rc:
+		rocker.info("Deploying container '{0}'".format(containerName))
+		_create(containerName, config, rocker)
+		_run(containerName, rocker)
+	else:
+		rocker.info("Skipping container {0} - nothing changed".format(containerName), duplicateId=(containerName,'create'))
+
+	return rc
+
+
+def _create(config, rocker):
+	pass
+
+def _run(config, rocker):
+	pass
