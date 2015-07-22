@@ -26,12 +26,9 @@ COMMANDS:
 		Prints this information
 	build <image path>
 		Builds the docker image in the specified subdir
-	create <container.rocker>
-		Creates a container as specified in the .rocker file.
-		Also will build dependent containers and the underlying images
-		if they have changed.
 	run <container.rocker>
-		Runs the specified container. Will issue build and create first.
+		Creates and starts the specified container. Will build/create underlying images/containers first.
+		Will skip any container/image that hasn't been changed.
 	version
 		Prints version information for rocker and the Docker daemon
 		(try -v or -vv to increase detail)
@@ -59,17 +56,6 @@ def main():
 			if len(args) != 2:
 				usage("'build' expects exactly one argument (the image path)")
 			image.build(args[1], rocker=rocker)
-		elif cmd == 'create':
-			if len(args) != 2:
-				usage("'create' expects exactly one argument (container name/.rocker file)")
-
-			name = args[1]
-
-			#container.create expects a container name as parameter => strip the extension
-			if name.endswith('.rocker'):
-				name = name[:-7]
-
-			container.create(name, rocker=rocker)
 		elif cmd == 'run':
 			if len(args) != 2:
 				usage("'run' expects exactly one argument (the container name)")
