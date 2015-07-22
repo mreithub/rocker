@@ -54,7 +54,6 @@ class TagFile:
 	# returns True if the tag file is up to date.
 	# If the tag file doesn't exist or is older than the compared files, False
 	# will be returned.
-
 	def check(self):
 			return self.tagMtime >= self.dataMtime
 
@@ -87,35 +86,46 @@ class TagFile:
 # whose mtime will be set to that of the newest file in the directory.
 #
 # This allows us to quickly decide whether an image rebuild is necessary.
+# Returns True if the image was built, False if the build was skipped (i.e. nothing changed).
+# Will raise exceptions on error.
 def build(imagePath, rocker=Rocker()):
 	tagFile = TagFile(imagePath)
+	skip = True
 
 	dockerFile = parseDockerfile(imagePath)
 
 	if dockerFile.parent != None:
 		if existsInProject(dockerFile.parent):
-			build(dockerFile.parent)
+			if build(dockerFile.parent):
+				# always rebuild the image if its parent was rebuilt
+				skip = False
 
 	imgInfo = inspect(imagePath)
 
 	# If docker doesn't have the image, build it even if there's a .rockerBuild file
-	if imgInfo != None and tagFile.check():
-		# nothing seems to have changed => skip building this image
-		rocker.debug(1, "Not building image '{0}' - nothing changed\n".format(imagePath), duplicateId=(imagePath,'build'))
-		return
+	if imgInfo == None:
+		skip == False # always build if docker doesn't know about the image
+	if not tagFile.check():
+		skip == False # .rockerBuild file is older than the dir's contents
 
-	rocker.info("Building image: {0}".format(imagePath))
+	if not skip:
+		rocker.info("Building image: {0}".format(imagePath))
 
-	# initiate build
-	with rocker.createRequest().doPost('/build?rm=1&t={0}'.format(imagePath)) as req:
-		req.enableChunkedMode()
-		tar = tarfile.open(mode='w', fileobj=req)
-		_fillTar(tar, imagePath)
-		resp = req.send()
-		rocker.printDockerOutput(resp)
+		# initiate build
+		with rocker.createRequest().doPost('/build?rm=1&t={0}'.format(imagePath)) as req:
+			req.enableChunkedMode()
+			tar = tarfile.open(mode='w', fileobj=req)
+			_fillTar(tar, imagePath)
+			resp = req.send()
+			rocker.printDockerOutput(resp)
 
-	# update mtime
-	tagFile.update()
+		# update mtime
+		tagFile.update()
+	else:
+		rocker.debug(1, "Skipping image '{0}' - nothing changed\n".format(imagePath), duplicateId=(imagePath,'build'))
+
+	return not skip
+
 
 # Returns whether or not the given image exists locally
 def exists(imageName, rocker=Rocker()):
