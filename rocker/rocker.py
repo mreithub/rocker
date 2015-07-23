@@ -7,7 +7,7 @@ import pkg_resources
 import sys
 
 # Source: https://svn.blender.org/svnroot/bf-blender/trunk/blender/build_files/scons/tools/bcolors.py
-# TODO Maybe use a library to do that
+# TODO Maybe use a library for coloring
 class Col:
 	HEADER = '\033[95m'
 	OKBLUE = '\033[94m'
@@ -17,6 +17,7 @@ class Col:
 	ENDC = '\033[0m'
 	BOLD = '\033[1m'
 	UNDERLINE = '\033[4m'
+
 
 # rocker boilerplate class
 class Rocker:
@@ -56,6 +57,9 @@ class Rocker:
 
 	def getDockerVersion(self):
 		return self.createRequest().doGet("/version").send().getObject()
+
+	def getVerbosity(self):
+		return self._verbosity
 
 	def getopt(self):
 		try:
