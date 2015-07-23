@@ -483,25 +483,6 @@ def isCurrent(containerName, imageName, pullImage=True, rocker=Rocker()):
 	# newer versions of an image will get a new Id
 	return ctrInfo.getImage() == imgInfo.id
 
-def _create(containerName, config, rocker):
-	with rocker.createRequest().doPost('/containers/create?name={0}'.format(containerName)) as req:
-		resp = req.send(config.toApiJson()).getObject()
-		if 'Warnings' in resp and resp['Warnings'] != None:
-			for w in resp['Warnings']:
-				sys.stderr.write("WARNING: {0}\n".format(w))
-		if not 'Id' in resp:
-			raise Exception("Missing 'Id' in docker response!")
-
-def _run(containerName, rocker):
-	info = inspect(containerName)
-	if not info.isRunning():
-		rocker.info("Starting container: {0}".format(containerName), duplicateId=(containerName,'run'))
-
-		with rocker.createRequest() as req:
-			req.doPost('/containers/{0}/start'.format(containerName)).send()
-	else:
-		rocker.debug(1, "Not starting {0} - already running".format(containerName), duplicateId=(containerName,'run'))
-
 def run(containerName, rocker=Rocker()):
 	config = Container.fromRockerFile(containerName)
 	rc = False
@@ -533,9 +514,21 @@ def run(containerName, rocker=Rocker()):
 
 	return rc
 
+def _create(containerName, config, rocker):
+	with rocker.createRequest().doPost('/containers/create?name={0}'.format(containerName)) as req:
+		resp = req.send(config.toApiJson()).getObject()
+		if 'Warnings' in resp and resp['Warnings'] != None:
+			for w in resp['Warnings']:
+				sys.stderr.write("WARNING: {0}\n".format(w))
+		if not 'Id' in resp:
+			raise Exception("Missing 'Id' in docker response!")
 
-def _create(config, rocker):
-	pass
+def _run(containerName, rocker):
+	info = inspect(containerName)
+	if not info.isRunning():
+		rocker.info("Starting container: {0}".format(containerName), duplicateId=(containerName,'run'))
 
-def _run(config, rocker):
-	pass
+		with rocker.createRequest() as req:
+			req.doPost('/containers/{0}/start'.format(containerName)).send()
+	else:
+		rocker.debug(1, "Not starting {0} - already running".format(containerName), duplicateId=(containerName,'run'))
