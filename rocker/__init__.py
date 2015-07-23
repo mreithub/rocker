@@ -81,6 +81,8 @@ def run(args, rocker):
 	else:
 		usage("Unknown command: '{0}'".format(cmd))
 
+	rocker.printQueuedMessages()
+
 def _debugWrapper(fn, *fnArgs):
 	try:
 		return fn(*fnArgs)

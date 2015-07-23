@@ -46,6 +46,7 @@ class Rocker:
 		self._url = url
 		self._lastMsgId = None
 		self._duplicateIDs = set()
+		self._msgQueue = []
 		self._verbosity = 0
 
 	# Returns a new RestClient instance pointing to the URL given in the constructor
@@ -127,6 +128,10 @@ class Rocker:
 		else:
 			self._lastMsgId = None
 
+	def printQueuedMessages(self):
+		for msg, stream in self._msgQueue:
+			self._msg(msg, None, None, stream)
+
 	def printVersion(self):
 		dockerInfo = self.getDockerVersion()
 		rockerInfo = pkg_resources.require("rocker")[0]
@@ -138,7 +143,7 @@ class Rocker:
 		self.debug(2, "Docker GIT revision: {GitCommit}".format(**dockerInfo))
 		self.debug(2, "Docker GO version {GoVersion}".format(**dockerInfo))
 
-	def _msg(self, msg, col, duplicateId, stream):
+	def _msg(self, msg, col, duplicateId, stream, delayed=False):
 		if duplicateId != None:
 			# don't print duplicate messages
 			if duplicateId in self._duplicateIDs:
@@ -149,7 +154,10 @@ class Rocker:
 		if col != None:
 			msg="{0}{1}{2}".format(col, msg, Col.ENDC)
 
-		stream.write("{0}\n".format(msg))
+		if delayed:
+			self._msgQueue.append((msg, stream))
+		else:
+			stream.write("{0}\n".format(msg))
 
 
 	def error(self, msg: str, exitCode=None):
@@ -157,8 +165,11 @@ class Rocker:
 		if exitCode != None:
 			sys.exit(exitCode)
 
-	def info(self, msg: str, duplicateId=None):
-		self._msg(msg, Col.OKGREEN, duplicateId, sys.stdout)
+	def info(self, msg: str, duplicateId=None, stream=sys.stdout, delayed=False):
+		self._msg(msg, None, duplicateId, stream, delayed)
+
+	def warning(self, msg: str):
+		self._msg(msg, Col.WARNING, None, sys.stderr)
 
 	def debug(self, level, msg, duplicateId=None):
 		if self._verbosity < level:
