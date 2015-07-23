@@ -104,9 +104,9 @@ def build(imagePath, rocker=Rocker()):
 
 	# If docker doesn't have the image, build it even if there's a .rockerBuild file
 	if imgInfo == None:
-		skip == False # always build if docker doesn't know about the image
+		skip = False # always build if docker doesn't know about the image
 	if not tagFile.check():
-		skip == False # .rockerBuild file is older than the dir's contents
+		skip = False # .rockerBuild file is older than the dir's contents
 
 	if not skip:
 		rocker.info("Building image: {0}".format(imagePath))
