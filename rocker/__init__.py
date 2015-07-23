@@ -43,36 +43,47 @@ OPTIONS:
 def main():
 	rocker = Rocker()
 
+	args = rocker.getopt()
+
+	if rocker.getVerbosity() < 3:
+		try:
+			return run(args, rocker)
+		except restclient.HttpResponseError as e:
+			rocker.printDockerMessage({'error': "Docker error (code: {0}): {1}".format(e.getCode(), str(e.getData(), "utf8"))})
+			return 1
+	else:
+		return _debugWrapper(run, args, rocker)
+
+
+def run(args, rocker):
+	if len(args) < 1:
+		usage("Missing command!")
+	cmd = args[0]
+
+	if cmd == 'help':
+		usage()
+	elif cmd == 'build':
+		if len(args) != 2:
+			usage("'build' expects exactly one argument (the image path)")
+		image.build(args[1], rocker=rocker)
+	elif cmd == 'run':
+		if len(args) != 2:
+			usage("'run' expects exactly one argument (the container name)")
+		name = args[1]
+
+		#container.run expects a container name as parameter => strip the extension
+		if name.endswith('.rocker'):
+			name = name[:-7]
+
+		container.run(name, rocker=rocker)
+	elif cmd == 'version':
+		rocker.printVersion()
+	else:
+		usage("Unknown command: '{0}'".format(cmd))
+
+def _debugWrapper(fn, *fnArgs):
 	try:
-		args = rocker.getopt()
-
-		if len(args) < 1:
-			usage("Missing command!")
-		cmd = args[0]
-
-		if cmd == 'help':
-			usage()
-		elif cmd == 'build':
-			if len(args) != 2:
-				usage("'build' expects exactly one argument (the image path)")
-			image.build(args[1], rocker=rocker)
-		elif cmd == 'run':
-			if len(args) != 2:
-				usage("'run' expects exactly one argument (the container name)")
-			name = args[1]
-
-			#container.run expects a container name as parameter => strip the extension
-			if name.endswith('.rocker'):
-				name = name[:-7]
-
-			container.run(name, rocker=rocker)
-		elif cmd == 'version':
-			rocker.printVersion()
-		else:
-			usage("Unknown command: '{0}'".format(cmd))
-	except restclient.HttpResponseError as e:
-		rocker.printDockerMessage({'error': "Docker error (code: {0}): {1}".format(e.getCode(), str(e.getData(), "utf8"))})
-		return 1
+		return fn(*fnArgs)
 	except BaseException as e:
 		# print local vars (for easier debugging)
 		exc_type, exc_value, tb = sys.exc_info()
