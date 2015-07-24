@@ -176,3 +176,27 @@ class Rocker:
 			return # too verbose
 
 		self._msg(msg, None, duplicateId, sys.stdout)
+
+	def choice(self, msg, options=['y', 'n'], default='y'):
+		rc = None
+
+		if not default in options:
+			raise KeyError("default ('{0}') not in options ({1})".format(default, options))
+
+		# construct choice string
+		choices = []
+		for o in options:
+			if o == default:
+				o = o.upper()
+			choices.append(o)
+		choices = "({0})".format('/'.join(choices))
+
+		while rc == None:
+			choice = input('{0} {1}: '.format(msg, choices)).lower()
+
+			if choice == '': #default
+				rc = default
+			elif choice in options:
+				rc = choice
+
+		return rc
