@@ -1,3 +1,4 @@
+from distutils.version import StrictVersion
 from rocker.restclient import Request
 
 import getopt
@@ -5,6 +6,8 @@ import json
 import os
 import pkg_resources
 import sys
+
+MIN_LABELS_VERSION = "1.17"
 
 # Source: https://svn.blender.org/svnroot/bf-blender/trunk/blender/build_files/scons/tools/bcolors.py
 # TODO Maybe use a library for coloring
@@ -49,6 +52,14 @@ class Rocker:
 		self._msgQueue = []
 		self._verbosity = 0
 
+		self._cachedDockerVersion = None
+
+	def checkApiVersion(self, minVersion, failMsg=False):
+		rc = StrictVersion(self.getDockerVersion()['ApiVersion']) >= StrictVersion(minVersion)
+		if failMsg and not rc:
+			self.error(failMsg)
+		return rc
+
 	# Returns a new RestClient instance pointing to the URL given in the constructor
 	def createRequest(self):
 		try:
@@ -57,7 +68,9 @@ class Rocker:
 			raise PermissionError("Couln't connect to docker at {0}".format(self._url))
 
 	def getDockerVersion(self):
-		return self.createRequest().doGet("/version").send().getObject()
+		if self._cachedDockerVersion == None:
+			self._cachedDockerVersion = self.createRequest().doGet("/version").send().getObject()
+		return self._cachedDockerVersion
 
 	def getVerbosity(self):
 		return self._verbosity
@@ -168,8 +181,8 @@ class Rocker:
 	def info(self, msg: str, duplicateId=None, stream=sys.stdout, delayed=False):
 		self._msg(msg, None, duplicateId, stream, delayed)
 
-	def warning(self, msg: str):
-		self._msg(msg, Col.WARNING, None, sys.stderr)
+	def warning(self, msg: str, duplicateId=None):
+		self._msg(msg, Col.WARNING, duplicateId, sys.stderr)
 
 	def debug(self, level, msg, duplicateId=None):
 		if self._verbosity < level:
