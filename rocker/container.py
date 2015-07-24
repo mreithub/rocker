@@ -1,7 +1,7 @@
-from rocker import image
-from rocker.rocker import Rocker
+from rocker import image, rocker
 from rocker.restclient import HttpResponseError
 
+import hashlib
 import json
 import os
 import sys
@@ -53,13 +53,14 @@ class Container:
 				rc['ro'] = self.ro
 			return rc
 
-	def __init__(self):
+	def __init__(self, r=rocker.Rocker()):
 		self._id = None
 		self._name = None
 		self._image = None
 
 		self._created = None
 		self._env = {}
+		self._labels = {}
 		self._links = {}
 		self._ports = []
 		self._raw = None
@@ -72,6 +73,8 @@ class Container:
 		self._entrypoint = None
 
 		self._depends = set()
+
+		self._rocker = r
 
 	def getId(self):
 		return self._id
@@ -88,6 +91,9 @@ class Container:
 
 	def getEnvironment(self):
 		return self._env
+
+	def getLabels(self):
+		return self._labels
 
 	def getLinks(self):
 		return self._links
@@ -116,9 +122,9 @@ class Container:
 
 	# Create a Container object from Docker's remote API format
 	@staticmethod
-	def fromApiJson(json):
+	def fromApiJson(json, r=rocker.Rocker()):
 		json = dict(json) # copy data (as _getValue() will mutate its contents)
-		rc = Container()
+		rc = Container(r)
 		rc._id = json['Id']
 		rc._name = Container._getValue(json, 'Name')
 		rc._image = json['Image']
@@ -147,18 +153,19 @@ class Container:
 		return rc
 
 	@staticmethod
-	def fromRockerFile(name):
-		config = Container._readConfig(name)
-		return Container.fromRockerConfig(name, config)
+	def fromRockerFile(name, r=rocker.Rocker()):
+		config = Container._readConfig(name, r)
+		return Container.fromRockerConfig(name, config, r)
 
 	@staticmethod
-	def fromRockerConfig(name, config):
-		rc = Container()
+	def fromRockerConfig(name, config, r=rocker.Rocker()):
+		rc = Container(r)
 
 		rc._name = name
 		rc._image = Container._getValue(config, 'image', "You need to specify an 'image' for your .rocker container!")
 
 		rc._env = Container._getValue(config, 'env')
+		rc._labels = Container._getValue(config, 'labels', defaultValue={})
 		rc._links = rc._parseLinks(config)
 		rc._ports = Container._parsePorts(config)
 		rc._raw = Container._getValue(config, 'raw')
@@ -201,6 +208,13 @@ class Container:
 			for key, value in self._env.items():
 				env.append("{0}={1}".format(key, value))
 			rc['Env'] = env
+
+		# Labels
+		if self._labels != None and len(self._labels) > 0:
+			Container._putValue(rc, "Labels", self._labels)
+
+			if not self._rocker.checkApiVersion(rocker.MIN_LABELS_VERSION):
+				self._rocker.warning("WARNING: You're using labels in container {0}, but your Docker doesn't support them (upgrade to at least v1.6)".format(self._name), duplicateId="noLabels")
 
 		# links
 		if self._links != None:
@@ -435,7 +449,7 @@ class Container:
 			data[key] = value
 
 	@staticmethod
-	def _readConfig(name):
+	def _readConfig(name, r=rocker.Rocker()):
 		path = None
 
 		if os.path.exists("{0}.rocker".format(name)):
@@ -444,15 +458,27 @@ class Container:
 			raise FileNotFoundError("Container configuration not found: '{0}'".format(name))
 
 		with open(path) as f:
-			return json.loads(f.read())
+			rc = json.loads(f.read())
+
+			if r.checkApiVersion(rocker.MIN_LABELS_VERSION):
+				# add the file's sha256 hash to the container's labels
+				# note that we're parsing+dumping the JSON file to assure getting the same hash regardless of whitespaces
+				# This label also serves as a check whether or not a container has been created by rocker
+				# (Docker supports container labels since v1.6 (API v1.17) so rocker will issue a warning if labels are used but not supported)
+				chksum = hashlib.sha256(json.dumps(rc, sort_keys=True).encode('utf8')).hexdigest()
+				if not 'labels' in rc:
+					rc['labels'] = {}
+				rc['labels']['zone.coding.rocker.fileHash'] = chksum
+
+			return rc
 
 # Returns detailed information about the given image (or None if not found)
-def inspect(containerName, rocker=Rocker()):
+def inspect(containerName, r=rocker.Rocker()):
 	rc = None
 
-	with rocker.createRequest() as req:
+	with r.createRequest() as req:
 		try:
-			rc = Container.fromApiJson(req.doGet('/containers/{0}/json'.format(containerName)).send().getObject())
+			rc = Container.fromApiJson(req.doGet('/containers/{0}/json'.format(containerName)).send().getObject(), r=r)
 		except HttpResponseError as e:
 			if e.getCode() == 404:
 				pass # return None
@@ -462,12 +488,12 @@ def inspect(containerName, rocker=Rocker()):
 	return rc
 
 # checks whether a container uses the current version of the underlying image
-def isCurrent(containerName, imageName, pullImage=True, rocker=Rocker()):
+def isCurrent(containerName, imageName, pullImage=True, r=rocker.Rocker()):
 	ctrInfo = inspect(containerName)
 	imgInfo = image.inspect(imageName)
 
 	if imgInfo == None and pullImage == True:
-		image.pull(imageName, rocker)
+		image.pull(imageName, r)
 		imgInfo = image.inspect(imageName)
 
 	if imgInfo == None:
@@ -483,13 +509,13 @@ def isCurrent(containerName, imageName, pullImage=True, rocker=Rocker()):
 	# newer versions of an image will get a new Id
 	return ctrInfo.getImage() == imgInfo.id
 
-def run(containerName, rocker=Rocker(), replace=False):
-	config = Container.fromRockerFile(containerName)
+def run(containerName, r=rocker.Rocker(), replace=False):
+	config = Container.fromRockerFile(containerName, r=r)
 	rc = False
 
 	# check if the image is part of the project and if it needs to be built
 	if image.existsInProject(config.getImage()):
-		if image.build(config.getImage(), rocker):
+		if image.build(config.getImage(), r):
 			# image was (re)built -> create container
 			rc = True
 
@@ -497,26 +523,26 @@ def run(containerName, rocker=Rocker(), replace=False):
 	for d in config.getDependencies():
 		# it seems that for docker links to work properly the containers have to be started at least once.
 		# Just creating them isn't sufficient
-		if run(d, rocker):
+		if run(d, r):
 			# at least one of the dependencies was started => create container
 			rc = True
 
 	# check if the container still uses the most recent image
-	if not isCurrent(containerName, config.getImage(), pullImage=True, rocker=rocker):
+	if not isCurrent(containerName, config.getImage(), pullImage=True, r=r):
 		rc = True
 
 	if rc:
-		rocker.info("Deploying container: {0}".format(containerName))
-		_create(containerName, config, rocker, replace)
-		_run(containerName, rocker)
+		r.info("Deploying container: {0}".format(containerName))
+		_create(containerName, config, r, replace)
+		_run(containerName, r)
 	else:
-		rocker.info("Skipping container {0} - nothing changed".format(containerName), duplicateId=(containerName,'create'))
+		r.info("Skipping container {0} - nothing changed".format(containerName), duplicateId=(containerName,'create'))
 
 	return rc
 
-def _create(containerName, config, rocker, replace):
+def _create(containerName, config, r, replace):
 	try:
-		with rocker.createRequest().doPost('/containers/create?name={0}'.format(containerName)) as req:
+		with r.createRequest().doPost('/containers/create?name={0}'.format(containerName)) as req:
 			resp = req.send(config.toApiJson()).getObject()
 			if 'Warnings' in resp and resp['Warnings'] != None:
 				for w in resp['Warnings']:
@@ -527,31 +553,31 @@ def _create(containerName, config, rocker, replace):
 		if e.getCode() == 409:
 			# Conflict -> fail
 			if replace:
-				choice = rocker.choice("Do you want to replace container '{0}'? You will lose non-persistent data!".format(containerName), default='n')
+				choice = r.choice("Do you want to replace container '{0}'? You will lose non-persistent data!".format(containerName), default='n')
 				if choice == 'y':
 					# issue a delete call
-					with rocker.createRequest().doDelete('/containers/{0}?force=1'.format(containerName)) as req:
+					with r.createRequest().doDelete('/containers/{0}?force=1'.format(containerName)) as req:
 						req.send()
 
 					# recursively call myself
-					_create(containerName, config, rocker, replace)
+					_create(containerName, config, r, replace)
 				else:
-					rocker.error("ERROR: Refused to overwrite container: {0}".format(containerName))
+					r.error("ERROR: Refused to overwrite container: {0}".format(containerName))
 			else:
-				rocker.error("ERROR: Container exists but is not up to date: {0}".format(containerName))
+				r.error("ERROR: Container exists but is not up to date: {0}".format(containerName))
 
-				rocker.info("""
+				r.info("""
 Some containers need to be replaced, but `rocker run` won't do that (to avoid deleting data accidentally).
 If you want to replace the container, have a look at `rocker rerun`""", stream=sys.stderr, duplicateId="rerunMsg", delayed=True)
 		else:
 			raise e
 
-def _run(containerName, rocker):
+def _run(containerName, r):
 	info = inspect(containerName)
 	if not info.isRunning():
-		rocker.info("Starting container: {0}".format(containerName), duplicateId=(containerName,'run'))
+		r.info("Starting container: {0}".format(containerName), duplicateId=(containerName,'run'))
 
-		with rocker.createRequest() as req:
+		with r.createRequest() as req:
 			req.doPost('/containers/{0}/start'.format(containerName)).send()
 	else:
-		rocker.debug(1, "Not starting {0} - already running".format(containerName), duplicateId=(containerName,'run'))
+		r.debug(1, "Not starting {0} - already running".format(containerName), duplicateId=(containerName,'run'))

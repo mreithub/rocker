@@ -14,4 +14,4 @@ def run(args, r):
 	if name.endswith('.rocker'):
 		name = name[:-7]
 
-	container.run(name, rocker=r)
+	container.run(name, r=r)
