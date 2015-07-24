@@ -483,7 +483,7 @@ def isCurrent(containerName, imageName, pullImage=True, rocker=Rocker()):
 	# newer versions of an image will get a new Id
 	return ctrInfo.getImage() == imgInfo.id
 
-def run(containerName, rocker=Rocker()):
+def run(containerName, rocker=Rocker(), replace=False):
 	config = Container.fromRockerFile(containerName)
 	rc = False
 
@@ -506,22 +506,45 @@ def run(containerName, rocker=Rocker()):
 		rc = True
 
 	if rc:
-		rocker.info("Deploying container '{0}'".format(containerName))
-		_create(containerName, config, rocker)
+		rocker.info("Deploying container: {0}".format(containerName))
+		_create(containerName, config, rocker, replace)
 		_run(containerName, rocker)
 	else:
 		rocker.info("Skipping container {0} - nothing changed".format(containerName), duplicateId=(containerName,'create'))
 
 	return rc
 
-def _create(containerName, config, rocker):
-	with rocker.createRequest().doPost('/containers/create?name={0}'.format(containerName)) as req:
-		resp = req.send(config.toApiJson()).getObject()
-		if 'Warnings' in resp and resp['Warnings'] != None:
-			for w in resp['Warnings']:
-				sys.stderr.write("WARNING: {0}\n".format(w))
-		if not 'Id' in resp:
-			raise Exception("Missing 'Id' in docker response!")
+def _create(containerName, config, rocker, replace):
+	try:
+		with rocker.createRequest().doPost('/containers/create?name={0}'.format(containerName)) as req:
+			resp = req.send(config.toApiJson()).getObject()
+			if 'Warnings' in resp and resp['Warnings'] != None:
+				for w in resp['Warnings']:
+					sys.stderr.write("WARNING: {0}\n".format(w))
+			if not 'Id' in resp:
+				raise Exception("Missing 'Id' in docker response!")
+	except HttpResponseError as e:
+		if e.getCode() == 409:
+			# Conflict -> fail
+			if replace:
+				choice = rocker.choice("Do you want to replace container '{0}'? You will lose non-persistent data!".format(containerName), default='n')
+				if choice == 'y':
+					# issue a delete call
+					with rocker.createRequest().doDelete('/containers/{0}?force=1'.format(containerName)) as req:
+						req.send()
+
+					# recursively call myself
+					_create(containerName, config, rocker, replace)
+				else:
+					rocker.error("ERROR: Refused to overwrite container: {0}".format(containerName))
+			else:
+				rocker.error("ERROR: Container exists but is not up to date: {0}".format(containerName))
+
+				rocker.info("""
+Some containers need to be replaced, but `rocker run` won't do that (to avoid deleting data accidentally).
+If you want to replace the container, have a look at `rocker rerun`""", stream=sys.stderr, duplicateId="rerunMsg", delayed=True)
+		else:
+			raise e
 
 def _run(containerName, rocker):
 	info = inspect(containerName)
