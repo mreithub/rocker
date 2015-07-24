@@ -92,6 +92,11 @@ class Request:
 	def close(self):
 		self._sock.close()
 
+	def doDelete(self, url):
+		self._method = "DELETE"
+		self._url = url
+		return self
+
 	# Specifies the url for this GET request
 	def doGet(self, url):
 		self._method = "GET"
