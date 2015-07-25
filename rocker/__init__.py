@@ -51,8 +51,10 @@ def main():
 		try:
 			return runCommand(args, rocker)
 		except restclient.HttpResponseError as e:
-			rocker.printDockerMessage({'error': "Docker error (code: {0}): {1}".format(e.getCode(), str(e.getData(), "utf8"))})
+			rocker.error("Docker error (code: {0}): {1}".format(e.getCode(), str(e.getData(), "utf8")))
 			return 1
+		except restclient.SocketError as e:
+			rocker.error(e.message)
 	else:
 		return _debugWrapper(runCommand, args, rocker)
 

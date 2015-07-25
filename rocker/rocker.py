@@ -1,5 +1,5 @@
 from distutils.version import StrictVersion
-from rocker.restclient import Request
+from rocker.restclient import Request, SocketError
 
 import getopt
 import json
@@ -64,8 +64,14 @@ class Rocker:
 	def createRequest(self):
 		try:
 			return Request(self._url)
-		except PermissionError as e:
-			raise PermissionError("Couln't connect to docker at {0}".format(self._url))
+		except SocketError as e:
+			# craft some docker-specific messages
+			if isinstance(e.cause, FileNotFoundError):
+				raise SocketError("Couldn't find Docker socket. Either docker is not running or listening somewhere other than '{0}'".format(self._url), e.cause)
+			elif isinstance(e.cause, PermissionError):
+				raise SocketError("Can't access Docker socket. Either rerun the command as root (e.g. via sudo) or add this user to the docker group.", e.cause)
+			else:
+				raise e
 
 	def getDockerVersion(self):
 		if self._cachedDockerVersion == None:
@@ -146,10 +152,12 @@ class Rocker:
 			self._msg(msg, None, None, stream)
 
 	def printVersion(self):
-		dockerInfo = self.getDockerVersion()
+		# print our own version first (in case we can't connect to docker)
 		rockerInfo = pkg_resources.require("rocker")[0]
-
 		print("Rocker version: {v}".format(v=rockerInfo.version))
+
+		dockerInfo = self.getDockerVersion()
+
 		print("Docker version: {Version}".format(**dockerInfo))
 		self.debug(1, "Docker API version: {ApiVersion}".format(**dockerInfo))
 		self.debug(1, "Docker Kernel version: {KernelVersion}".format(**dockerInfo))
@@ -173,7 +181,7 @@ class Rocker:
 			stream.write("{0}\n".format(msg))
 
 
-	def error(self, msg: str, exitCode=None):
+	def error(self, msg: str, exitCode=1):
 		self._msg("ERROR: {0}".format(msg), Col.FAIL, None, sys.stderr)
 		if exitCode != None:
 			sys.exit(exitCode)

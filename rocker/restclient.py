@@ -1,3 +1,4 @@
+
 import codecs
 import json
 import select
@@ -47,15 +48,20 @@ class Request:
 
 		self.setHeader("User-agent", "rocker v0.1") # TODO use the real rocker version
 
-		if url.scheme == 'unix':
-			sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-			sock.connect(url.path)
-		elif url.scheme in ['http', 'https']:
-			raise Exception("Not yet implemented: {0}".format(url))
-			sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-			sock.create_connection()
-		else:
-			raise Exception("Unsupported schema: {0}".format(url.schema))
+		try:
+			if url.scheme == 'unix':
+				sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+				sock.connect(url.path)
+			elif url.scheme in ['http', 'https']:
+				raise Exception("Not yet implemented: {0}".format(url))
+				sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+				sock.create_connection()
+			else:
+				raise Exception("Unsupported schema: {0}".format(url.schema))
+		except PermissionError as e:
+			raise SocketError("Can't access '{0}'".format(url), e)
+		except FileNotFoundError as e:
+			raise SocketError("Socket not found: '{0}'".format(url), e)
 
 #		sock.setblocking(0)
 
@@ -574,3 +580,9 @@ class HttpResponseError(Exception):
 
 	def getData(self):
 		return self._data
+
+# Indicates some sort of error while connecting to the remote service
+class SocketError(Exception):
+	def __init__(self, message, cause=None):
+		self.message = message
+		self.cause = cause
