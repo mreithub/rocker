@@ -2,6 +2,9 @@ rocker.egg-info
 *.pyc
 .rockerBuild
 
+build/
+dist/
+
 .kdev4/
 .metadata/
 rocker.kdev4
