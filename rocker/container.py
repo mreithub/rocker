@@ -23,7 +23,7 @@ class Container:
 				self.int = data['int']
 				self.ext = data['ext']
 
-				self.proto = Container._getValue(data, 'proto')
+				self.proto = Container._getValue(data, 'proto', defaultValue='tcp')
 				self.extIp = Container._getValue(data, 'extIp')
 
 		def toRockerFormat(self):
