@@ -61,6 +61,7 @@ class Container:
 		self._created = None
 		self._caps = []
 		self._env = {}
+		self._hosts = {}
 		self._labels = {}
 		self._links = {}
 		self._netMode = None
@@ -80,6 +81,9 @@ class Container:
 
 	def getId(self):
 		return self._id
+
+	def getHosts(self):
+		return self._hosts
 
 	def getImage(self):
 		return self._image
@@ -159,6 +163,15 @@ class Container:
 				for c in hostConfig['CapDrop']:
 					rc._caps.append('-{0}'.format(c))
 
+			if 'ExtraHosts' in hostConfig and type(hostConfig['ExtraHosts']) == list:
+				hosts = {}
+				for h in hostConfig['ExtraHosts']:
+					h = h.split(':')
+					if len(h) != 2:
+						raise ValueError("ExtraHosts entry expected to have exactly one colon: {0}".format(hostConfig['ExtraHosts']))
+					hosts[h[0]] = h[1]
+				rc._hosts = hosts
+
 		# TODO parse links
 		# TODO parse ports
 		# TODO parse restart policy
@@ -186,6 +199,7 @@ class Container:
 
 		rc._caps = Container._getValue(config, 'caps')
 		rc._env = Container._getValue(config, 'env')
+		rc._hosts = Container._getValue(config, 'hosts')
 		rc._labels = Container._getValue(config, 'labels', defaultValue={})
 		rc._links = rc._parseLinks(config)
 		rc._netMode = Container._getValue(config, 'netMode')
@@ -246,6 +260,13 @@ class Container:
 			for key, value in self._env.items():
 				env.append("{0}={1}".format(key, value))
 			rc['Env'] = env
+
+		# extra hosts
+		if self._hosts != None and len(self._hosts) > 0:
+			hosts = []
+			for host, ip in self._hosts.items():
+				hosts.append('{0}:{1}'.format(host, ip))
+			hostConfig['ExtraHosts'] = hosts
 
 		# Labels
 		if self._labels != None and len(self._labels) > 0:
@@ -339,6 +360,7 @@ class Container:
 		Container._putValue(data, 'cmd', self._cmd)
 		Container._putValue(data, 'entrypoint', self._entrypoint)
 		Container._putValue(data, 'netMode', self._netMode)
+		Container._putValue(data, 'hosts', self._hosts)
 
 		if self._restart not in [True, 'always']: 
 			Container._putValue(data, 'restart', self._restart)

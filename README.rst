@@ -65,6 +65,9 @@ The following is a complete example of all supported configuration options:
         "env": {
             "ADMIN_PASSWORD": "hackme"
         },
+        "hosts": {
+            "dnsserver": "8.8.8.8"
+        },
         "links": [
             "postgres:db", "mail"
         ],
@@ -116,6 +119,13 @@ Description:
   Sets environment variables inside the container.
 
   ``env`` expects a JSON string map with variable names and their values
+
+- ``"hosts": {"hostname": "ip", ...}``
+
+  Allows you to specify host/ip tuples to be added to the container's ``/etc/hosts`` file.
+  Docker takes control of that file so any changes you make to it directly will most likely be lost at some point.
+  To be able to add your own entries anyway you can use this setting (which is equivalent to ``docker run``'s ``--add-host`` option).
+
 - ``"links": ["otherContainer", "thirdContainer:alias", ...]``
 
   Adds a link to another container (i.e. an entry in the container's ``/etc/hosts`` file (and some environment variables - for details see the Docker docs).
