@@ -78,6 +78,7 @@ The following is a complete example of all supported configuration options:
         "volumesFrom": ["app-data"],
         "cmd": ["echo", "hello world"],
         "entrypoint": ["echo", "foo"],
+        "netMode": "bridge",
         "restart": true,
         "raw": {...}
     }
@@ -155,6 +156,16 @@ Description:
 - ``"entrypoint": ["/path/to/command", "arg1", "arg2", ...]``
 
   Similar to ``"cmd": [...]``.
+
+- ``"netMode": "bridge"``
+
+  Set the container's network mode. The string value you set here will be sent to Docker unmodified.
+
+  Supported values (at the time of writing):
+
+  - ``bridge`` (default): The container will get its own internal IP on Docker's virtual network interface (default: ``docker0``)
+  - ``host``: The container shares the host's network interfaces (and therefore can dynamically bind any unused port on the host).
+  - ``container:<name|id>``: Share another container's interface(s).
 
 - ``"restart": True``
 

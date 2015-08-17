@@ -62,6 +62,7 @@ class Container:
 		self._env = {}
 		self._labels = {}
 		self._links = {}
+		self._netMode = None
 		self._ports = []
 		self._raw = None
 		self._restart = None
@@ -98,6 +99,9 @@ class Container:
 	def getLinks(self):
 		return self._links
 
+	def getNetworkMode(self):
+		return self._netMode
+
 	def getPorts(self):
 		return self._ports
 
@@ -132,12 +136,18 @@ class Container:
 		rc._created = json['Created'] # TODO parse date
 		rc._state = Container._getValue(json, 'State') # TODO parse value map
 
-		if 'Config' in json and 'Env' in json['Config']:
-			# environment variables
-			rc._env = {}
-			for e in json['Config']['Env']:
-				var, value = e.split('=', 1)
-				rc._env[var] = value
+		if 'Config' in json:
+			config = json['Config']
+			if 'Env' in config:
+				# environment variables
+				rc._env = {}
+				for e in config['Env']:
+					var, value = e.split('=', 1)
+					rc._env[var] = value
+
+		if 'HostConfig' in json:
+			hostConfig = json['HostConfig']
+			rc._netMode = Container._getValue(hostConfig, 'NetworkMode')
 
 		# TODO parse links
 		# TODO parse ports
@@ -167,6 +177,7 @@ class Container:
 		rc._env = Container._getValue(config, 'env')
 		rc._labels = Container._getValue(config, 'labels', defaultValue={})
 		rc._links = rc._parseLinks(config)
+		rc._netMode = Container._getValue(config, 'netMode')
 		rc._ports = Container._parsePorts(config)
 		rc._raw = Container._getValue(config, 'raw')
 		rc._restart = Container._getValue(config, 'restart', defaultValue=True)
@@ -275,6 +286,9 @@ class Container:
 
 		Container._putValue(hostConfig, "RestartPolicy", restartPolicy)
 
+
+		Container._putValue(hostConfig, "NetworkMode", self._netMode)
+
 		rc['HostConfig'] = hostConfig
 
 		return rc
@@ -297,6 +311,7 @@ class Container:
 		Container._putValue(data, 'env', self._env)
 		Container._putValue(data, 'cmd', self._cmd)
 		Container._putValue(data, 'entrypoint', self._entrypoint)
+		Container._putValue(data, 'netMode', self._netMode)
 
 		if self._restart not in [True, 'always']: 
 			Container._putValue(data, 'restart', self._restart)
