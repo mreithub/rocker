@@ -58,6 +58,10 @@ The following is a complete example of all supported configuration options:
 
     {
         "image": "acme/app",
+		"caps": [
+			"ALL",
+			"-MKNOD"
+		]
         "env": {
             "ADMIN_PASSWORD": "hackme"
         },
@@ -75,11 +79,11 @@ The following is a complete example of all supported configuration options:
             { "src": "/home/user/app", "tgt": "/app", "ro": true },
             ...
         ],
-        "volumesFrom": ["app-data"],
         "cmd": ["echo", "hello world"],
         "entrypoint": ["echo", "foo"],
         "netMode": "bridge",
         "restart": true,
+        "volumesFrom": ["app-data"],
         "raw": {...}
     }
 
@@ -94,6 +98,18 @@ Description:
   If you do, make sure you have a your directory structure set up accordingly.
   
   Note: Docker expects image names to follow the following format: ``[a-z0-9-_.]+``
+
+- ``"caps": ["ALL", "-MKNOD"]``
+
+  Adds/drops container capabilities. If you want to drop caps, prepend the string with a dash (``-``).
+
+  There's the special value ``ALL`` that will add all capabilities to the container.
+  So the above example allows the container to do pretty much anything but invoke ``mknod`` calls.
+  Keep in mind though that there are good reasons for being restrictive about capabilities
+  (processes running in a container with ``ALL`` caps can easily break out of them and therefore compromise
+  other containers as well as the host itself).
+
+  For a list of supported capabilities have a look at `docker run docs`_' or `capabilities manpage`_
 
 - ``"env": {...}``
 
@@ -235,3 +251,6 @@ FAQ
 .. _postgres: https://github.com/mreithub/rocker/tree/master/examples/postgres
 .. _wordpress: https://github.com/mreithub/rocker/tree/master/examples/wordpress
 .. _php: https://github.com/mreithub/rocker/tree/master/examples/phpApp
+
+.. _docker run docs: https://docs.docker.com/reference/run/#runtime-privilege-linux-capabilities-and-lxc-configuration
+.. _capabilities manpage: http://man7.org/linux/man-pages/man7/capabilities.7.html

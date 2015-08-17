@@ -59,6 +59,7 @@ class Container:
 		self._image = None
 
 		self._created = None
+		self._caps = []
 		self._env = {}
 		self._labels = {}
 		self._links = {}
@@ -86,6 +87,8 @@ class Container:
 	def getName(self):
 		return self._name
 
+	def getCapabilities(self):
+		return self._caps
 
 	def getCreatedAt(self):
 		return self._created
@@ -138,7 +141,7 @@ class Container:
 
 		if 'Config' in json:
 			config = json['Config']
-			if 'Env' in config:
+			if 'Env' in config and type(config['Env']) == list:
 				# environment variables
 				rc._env = {}
 				for e in config['Env']:
@@ -148,6 +151,13 @@ class Container:
 		if 'HostConfig' in json:
 			hostConfig = json['HostConfig']
 			rc._netMode = Container._getValue(hostConfig, 'NetworkMode')
+
+			if 'CapAdd' in hostConfig and type(hostConfig['CapAdd']) == list:
+				for c in hostConfig['CapAdd']:
+					rc._caps.append(c)
+			if 'CapDrop' in hostConfig and type(hostConfig['CapDrop']) == list:
+				for c in hostConfig['CapDrop']:
+					rc._caps.append('-{0}'.format(c))
 
 		# TODO parse links
 		# TODO parse ports
@@ -174,6 +184,7 @@ class Container:
 		rc._name = name
 		rc._image = Container._getValue(config, 'image', "You need to specify an 'image' for your .rocker container!")
 
+		rc._caps = Container._getValue(config, 'caps')
 		rc._env = Container._getValue(config, 'env')
 		rc._labels = Container._getValue(config, 'labels', defaultValue={})
 		rc._links = rc._parseLinks(config)
@@ -214,7 +225,21 @@ class Container:
 		Container._putValue(rc, "Image", self._image)
 		Container._putValue(rc, "Cmd", self._cmd)
 		Container._putValue(rc, "Entrypoint", self._entrypoint)
-		
+
+		# caps
+		if self._caps != None and len(self._caps) > 0:
+			capAdd = []
+			capDrop = []
+
+			for c in self._caps:
+				if not c.startswith('-'):
+					capAdd.append(c)
+				else:
+					capDrop.append(c[1:])
+
+			hostConfig['CapAdd'] = capAdd
+			hostConfig['CapDrop'] = capDrop
+
 		# env
 		if self._env != None:
 			env = []
