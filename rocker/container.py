@@ -208,6 +208,8 @@ class Container:
 		# non-raw entries override raw ones => seed from raw first
 		if self._raw != None:
 			rc = self._raw;
+			if 'HostConfig' in rc:
+				hostConfig = rc['HostConfig'] # make sure to also preseed the hostConfig variable
 
 		Container._putValue(rc, "Image", self._image)
 		Container._putValue(rc, "Cmd", self._cmd)
