@@ -85,6 +85,7 @@ The following is a complete example of all supported configuration options:
         "cmd": ["echo", "hello world"],
         "entrypoint": ["echo", "foo"],
         "netMode": "bridge",
+        "privileged": false,
         "restart": true,
         "volumesFrom": ["app-data"],
         "raw": {...}
@@ -193,7 +194,15 @@ Description:
   - ``host``: The container shares the host's network interfaces (and therefore can dynamically bind any unused port on the host).
   - ``container:<name|id>``: Share another container's interface(s).
 
-- ``"restart": True``
+- ``"privileged": false``
+
+  When set to true, the docker container will run in the so called *privileged* mode.
+
+  Containers running in the privileged mode may pose a serious security risk, so you should only use it if you know what you're doing (In most cases it's better to use ``"caps"`` instead).
+
+  Have a look at the `docker run docs`_' for details.
+
+- ``"restart": true``
 
   Set the restart policy of the container.
 

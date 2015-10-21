@@ -66,6 +66,7 @@ class Container:
 		self._links = {}
 		self._netMode = None
 		self._ports = []
+		self._privileged = None
 		self._raw = None
 		self._restart = None
 		self._state = None
@@ -111,6 +112,9 @@ class Container:
 
 	def getPorts(self):
 		return self._ports
+
+	def getPrivileged(self):
+		return self._privileged
 
 	def getRawData(self):
 		return self._raw
@@ -162,7 +166,6 @@ class Container:
 			if 'CapDrop' in hostConfig and type(hostConfig['CapDrop']) == list:
 				for c in hostConfig['CapDrop']:
 					rc._caps.append('-{0}'.format(c))
-
 			if 'ExtraHosts' in hostConfig and type(hostConfig['ExtraHosts']) == list:
 				hosts = {}
 				for h in hostConfig['ExtraHosts']:
@@ -171,6 +174,8 @@ class Container:
 						raise ValueError("ExtraHosts entry expected to have exactly one colon: {0}".format(hostConfig['ExtraHosts']))
 					hosts[h[0]] = h[1]
 				rc._hosts = hosts
+			if 'Privileged' in hostConfig:
+				rc._privileged = hostConfig['Privileged'] == True
 
 		# TODO parse links
 		# TODO parse ports
@@ -204,6 +209,7 @@ class Container:
 		rc._links = rc._parseLinks(config)
 		rc._netMode = Container._getValue(config, 'netMode')
 		rc._ports = Container._parsePorts(config)
+		rc._privileged = Container._getValue(config, 'privileged', defaultValue=False)
 		rc._raw = Container._getValue(config, 'raw')
 		rc._restart = Container._getValue(config, 'restart', defaultValue=True)
 		rc._volumes = Container._parseVolumes(config, name)
@@ -295,6 +301,10 @@ class Container:
 
 				portBindings[key] = [{"HostIp":extIp, "HostPort": str(port.ext)}]
 			hostConfig['PortBindings'] = portBindings
+
+		# privileged mode
+		if self._privileged == True:
+			hostConfig['Privileged'] = True
 
 		# volumes
 		if self._volumes != None:
