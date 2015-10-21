@@ -488,7 +488,8 @@ class Container:
 					if 'src' in v:
 						# create host directory if necessary
 						srcPath = os.path.join('/docker', containerName, v['src'])
-						Container._mkdirs(srcPath)
+						if not os.path.exists(srcPath): # TODO this won't work if docker's running on a remote host
+							Container._mkdirs(srcPath)
 						src = srcPath
 
 					if 'ro' in v and v['ro'] == True:
