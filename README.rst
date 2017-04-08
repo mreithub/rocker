@@ -1,6 +1,16 @@
 rocker - Docker build tool
 ==========================
 
+** ABANDONED PROJECT! **
+I've started `rocker` back when I had no idea `docker-compose` (which at that time was still known as `fig`) existed.  
+It had kinda the same idea but I wanted to do things a little different (separate files for each service for example) and when the core thing would've been done, I wanted to add certain features on top (I was thinking of a standardized way to do backups for example).  
+It also used its own HTTP client to speak with docker (instead of the official docker python bindings) which is another possible source for bugs :).
+
+I've migrated pretty much everything to docker-compose now, so it's quite unlikely that this tool will get much maintenance.
+The things I've used it for mostly worked though (with a few minor quirks where it not always noticed when an image/container needed to be rebuilt/recreated) and I'm keeping the repo up here for reference.
+
+-----
+
 rocker aims to ease the creation and deployment of Docker images/containers.
 
 It uses so called ``.rocker`` files, rather simple JSON files which serve as a counterpart to Dockerfiles but for containers.
